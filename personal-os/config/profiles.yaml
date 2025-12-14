@@ -1,0 +1,142 @@
+# MCP Profiles
+# Each profile defines which MCPs to load for a category of tasks
+# The router selects the appropriate profile based on task content
+
+profiles:
+  # Sales & CRM tasks
+  crm:
+    name: "CRM & Sales"
+    description: "Sales calls, contact management, deal tracking, follow-ups"
+    mcps:
+      - hubspot
+      - google-calendar
+      - slack
+    triggers:
+      keywords:
+        - "call with"
+        - "meeting with"
+        - "sales"
+        - "deal"
+        - "prospect"
+        - "lead"
+        - "follow up"
+        - "client"
+        - "customer"
+      patterns:
+        - ".*\\b(met|spoke|called|emailed)\\b.*\\b(with|to)\\b.*"
+        - ".*\\b(interested in|wants to|looking for)\\b.*"
+
+  # Research & learning
+  research:
+    name: "Research"
+    description: "Research topics, save findings, learn new things"
+    mcps:
+      - web-search
+      - notion
+    triggers:
+      keywords:
+        - "research"
+        - "find out"
+        - "look up"
+        - "learn about"
+        - "what is"
+        - "how does"
+        - "summarize"
+      patterns:
+        - ".*\\b(research|investigate|explore)\\b.*"
+
+  # Personal task management
+  personal:
+    name: "Personal"
+    description: "Personal tasks, reminders, life admin"
+    mcps:
+      - todoist
+      - google-calendar
+    triggers:
+      keywords:
+        - "remind me"
+        - "todo"
+        - "task"
+        - "need to"
+        - "don't forget"
+        - "pick up"
+        - "buy"
+        - "schedule"
+      patterns:
+        - ".*\\b(remind|remember|schedule|book)\\b.*"
+
+  # Development & coding
+  dev:
+    name: "Development"
+    description: "Code tasks, bugs, features, PRs"
+    mcps:
+      - github
+      - linear
+      - slack
+    triggers:
+      keywords:
+        - "bug"
+        - "feature"
+        - "PR"
+        - "pull request"
+        - "code"
+        - "deploy"
+        - "fix"
+        - "implement"
+        - "issue"
+      patterns:
+        - ".*\\b(bug|issue|PR|deploy|merge)\\b.*"
+
+  # Notes & documentation
+  notes:
+    name: "Notes"
+    description: "Long-form notes, documentation, ideas"
+    mcps:
+      - notion
+    triggers:
+      keywords:
+        - "note"
+        - "document"
+        - "write up"
+        - "idea"
+        - "draft"
+      patterns:
+        - ".*\\b(write|draft|document|note)\\b.*"
+
+  # Communication
+  comms:
+    name: "Communication"
+    description: "Messages, updates, announcements"
+    mcps:
+      - slack
+      - gmail  # if available
+    triggers:
+      keywords:
+        - "message"
+        - "tell"
+        - "notify"
+        - "announce"
+        - "share"
+        - "post"
+      patterns:
+        - ".*\\b(tell|notify|message|post|share)\\b.*"
+
+  # Fallback - general purpose
+  general:
+    name: "General"
+    description: "General tasks that don't fit a specific category"
+    mcps:
+      - todoist
+      - google-calendar
+      - slack
+      - notion
+    triggers:
+      # This is the fallback, matches anything
+      keywords: []
+      patterns: []
+
+# Default profile if router can't determine
+default_profile: general
+
+# Maximum MCPs to load (to prevent overload)
+max_mcps: 5

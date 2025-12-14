@@ -73,15 +73,19 @@ AVAILABLE PROFILES:
 
 ${profileDescriptions}
 
-INSTRUCTIONS:
-- Read the task carefully
-- Match it to the profile whose description best fits
-- If the task needs web/internet information → research
-- If ambiguous or multi-domain → general
-- Respond with ONLY valid JSON, no markdown code blocks
+ROUTING RULES (follow strictly):
+1. If the task asks to SEARCH, RESEARCH, FIND OUT, LOOK UP, or needs INTERNET INFO → "research"
+2. If the task involves SALES, CRM, CLIENTS, DEALS, FOLLOW-UPS → "crm"
+3. If the task is a PERSONAL REMINDER, TODO, or SCHEDULING → "personal"
+4. If the task involves CODE, BUGS, PRS, GITHUB, LINEAR → "dev"
+5. If the task involves WRITING, NOTES, DOCUMENTATION, NOTION → "notes"
+6. If the task involves MESSAGING, SLACK, EMAIL, COMMUNICATION → "comms"
+7. ONLY use "general" if NONE of the above apply
 
-OUTPUT FORMAT:
-{"profile": "profile_id", "confidence": 0.95, "reasoning": "brief explanation"}`;
+DEFAULT BIAS: Prefer "research" for any information-seeking task. Most questions need web search.
+
+Respond with ONLY valid JSON (no markdown):
+{"profile": "profile_id", "confidence": 0.95, "reasoning": "brief reason"}`;
 }
 
 /**
@@ -114,8 +118,14 @@ async function routeWithLLM(
       throw new Error("No text response from router");
     }
 
-    // Parse JSON response
-    const result = JSON.parse(textBlock.text) as {
+    // Parse JSON response (strip markdown code blocks if present)
+    let jsonText = textBlock.text.trim();
+    if (jsonText.startsWith("```")) {
+      // Remove markdown code blocks
+      jsonText = jsonText.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+
+    const result = JSON.parse(jsonText) as {
       profile: string;
       confidence: number;
       reasoning: string;

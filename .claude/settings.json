@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(echo \"$CLAUDE_TOOL_INPUT\" | jq -r '.command // empty'); if echo \"$cmd\" | grep -qE 'rm -rf /|rm -rf ~|:(){ :|:& };:|> /dev/sda|mkfs\\.|dd if=.* of=/dev'; then echo 'BLOCKED: Dangerous command detected' >&2; exit 2; fi",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "path=$(echo \"$CLAUDE_TOOL_INPUT\" | jq -r '.file_path // empty'); if echo \"$path\" | grep -qE '\\.env$|credentials|secrets|password|\\.pem$|\\.key$'; then echo 'WARNING: Modifying sensitive file - proceed with caution' >&2; fi; exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Session completed\" >> ~/.claude/session-log.txt",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

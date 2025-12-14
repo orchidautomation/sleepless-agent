@@ -1,11 +1,11 @@
 /**
- * Agent SDK Executor
+ * Vercel Sandbox Executor
  *
- * Executes tasks using Claude Agent SDK with dynamic MCP loading.
- * Runs directly in the Vercel Function (no sandbox isolation needed).
+ * Executes tasks using Claude Agent SDK inside a Vercel Sandbox.
+ * The sandbox provides isolated execution with the CLI pre-installed.
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { Sandbox } from "@vercel/sandbox";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
@@ -55,16 +55,17 @@ function loadMcpConfigs(): McpsYaml {
 }
 
 /**
- * Build MCP server config for Agent SDK
+ * Build MCP server config object for the Agent SDK
+ * Returns a serializable config that can be passed to the sandbox
  */
-function buildMcpServers(mcpIds: string[]): Record<string, object> {
+function buildMcpServersConfig(mcpIds: string[]): Record<string, object> {
   const mcpConfigs = loadMcpConfigs();
   const mcpServers: Record<string, object> = {};
 
   for (const mcpId of mcpIds) {
     const mcp = mcpConfigs.mcps[mcpId];
     if (!mcp) {
-      console.warn(`[Agent] MCP "${mcpId}" not found in config, skipping`);
+      console.warn(`[Sandbox] MCP "${mcpId}" not found in config, skipping`);
       continue;
     }
 
@@ -122,56 +123,115 @@ function parseTimeout(timeout: string): number {
 }
 
 /**
- * Execute a task using Claude Agent SDK directly
- * (No Vercel Sandbox isolation - runs in the Vercel Function itself)
+ * Execute a task using Claude Agent SDK inside a Vercel Sandbox
+ *
+ * Pattern:
+ * 1. Create ephemeral Vercel Sandbox
+ * 2. Install Claude Code CLI inside the sandbox
+ * 3. Install Agent SDK inside the sandbox
+ * 4. Write and execute agent script inside the sandbox
+ * 5. Capture output and cleanup
  */
 export async function executeInSandbox(
   config: SandboxConfig
 ): Promise<SandboxResult> {
   const startTime = Date.now();
+  let sandbox: Sandbox | null = null;
 
-  console.log(`[Agent] Starting execution`);
-  console.log(`[Agent] Task: ${config.task}`);
-  console.log(`[Agent] MCPs: ${config.mcps.join(", ") || "none"}`);
-  console.log(`[Agent] Timeout: ${config.timeout}`);
+  console.log(`[Sandbox] Starting execution`);
+  console.log(`[Sandbox] Task: ${config.task.slice(0, 100)}...`);
+  console.log(`[Sandbox] MCPs: ${config.mcps.join(", ") || "none"}`);
+  console.log(`[Sandbox] Timeout: ${config.timeout}`);
 
   // Check for required auth
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
-  if (!authToken) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
     return {
       output: "",
       success: false,
-      error: "Missing ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable",
+      error: "Missing ANTHROPIC_API_KEY environment variable",
       duration: Date.now() - startTime,
     };
   }
 
-  console.log(`[Agent] API Key present: true (length: ${authToken.length})`);
+  try {
+    // Step 1: Create the sandbox
+    console.log(`[Sandbox] Creating Vercel Sandbox...`);
+    sandbox = await Sandbox.create({
+      resources: { vcpus: 4 },
+      timeout: parseTimeout(config.timeout),
+      runtime: "node22",
+    });
+    console.log(`[Sandbox] Created: ${sandbox.sandboxId}`);
+
+    // Step 2: Install Claude Code CLI globally
+    console.log(`[Sandbox] Installing Claude Code CLI...`);
+    const installCLI = await sandbox.runCommand({
+      cmd: "npm",
+      args: ["install", "-g", "@anthropic-ai/claude-code"],
+      sudo: true,
+    });
+
+    if (installCLI.exitCode !== 0) {
+      throw new Error("Failed to install Claude Code CLI");
+    }
+    console.log(`[Sandbox] CLI installed`);
+
+    // Step 3: Install Agent SDK
+    console.log(`[Sandbox] Installing Agent SDK...`);
+    const installSDK = await sandbox.runCommand({
+      cmd: "npm",
+      args: ["install", "@anthropic-ai/claude-agent-sdk", "@anthropic-ai/sdk"],
+    });
+
+    if (installSDK.exitCode !== 0) {
+      throw new Error("Failed to install Agent SDK");
+    }
+    console.log(`[Sandbox] SDK installed`);
+
+    // Step 4: Build MCP config and agent script
+    const mcpServers = buildMcpServersConfig(config.mcps);
+    const hasMcps = Object.keys(mcpServers).length > 0;
+
+    console.log(
+      `[Sandbox] MCP servers: ${Object.keys(mcpServers).join(", ") || "none"}`
+    );
+
+    // Build the agent script to run inside the sandbox
+    // Results are written to a file so we can read them back
+    const agentScript = `
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { writeFileSync } from 'fs';
+
+const task = ${JSON.stringify(config.task)};
+const mcpServers = ${JSON.stringify(mcpServers)};
+const hasMcps = ${hasMcps};
+
+function writeResult(result) {
+  writeFileSync('/vercel/sandbox/result.json', JSON.stringify(result));
+}
+
+async function runAgent() {
+  let fullOutput = "";
+  let hasError = false;
+  let errorMessages = [];
 
   try {
-    // Build MCP servers config
-    const mcpServers = buildMcpServers(config.mcps);
-    console.log(`[Agent] MCP servers configured: ${Object.keys(mcpServers).join(", ") || "none"}`);
+    const options = {
+      allowedTools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "WebFetch", "WebSearch"],
+      permissionMode: "bypassPermissions",
+    };
 
-    // Run the Agent SDK query directly
-    let fullOutput = "";
-    let hasError = false;
-    let errorMessages: string[] = [];
-
-    console.log("[Agent] Starting query...");
+    // Only add MCP servers if we have any
+    if (hasMcps && Object.keys(mcpServers).length > 0) {
+      options.mcpServers = mcpServers;
+    }
 
     for await (const message of query({
-      prompt: config.task,
-      options: {
-        allowedTools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "WebFetch", "WebSearch"],
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mcpServers: mcpServers as any,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-      },
+      prompt: task,
+      options,
     })) {
       if (message.type === "assistant") {
-        // Assistant message with content blocks
         const content = message.message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -181,42 +241,111 @@ export async function executeInSandbox(
           }
         }
       } else if (message.type === "result") {
-        // Final result message
         if (message.subtype === "success") {
-          fullOutput = message.result || fullOutput;
-          console.log(`[Agent] Result success`);
+          if (message.result) {
+            fullOutput = message.result;
+          }
         } else {
           hasError = true;
           errorMessages = message.errors || [message.subtype];
-          console.error(`[Agent] Result error: ${message.subtype}`);
         }
-      } else if (message.type === "system") {
-        console.log(`[Agent] System: ${message.subtype}`);
       }
     }
 
+    writeResult({
+      success: !hasError,
+      output: fullOutput,
+      errors: errorMessages,
+    });
+
+  } catch (error) {
+    writeResult({
+      success: false,
+      output: "",
+      errors: [error.message || String(error)],
+    });
+  }
+}
+
+runAgent();
+`;
+
+    // Step 5: Write the agent script to the sandbox
+    await sandbox.writeFiles([
+      {
+        path: "/vercel/sandbox/agent-task.mjs",
+        content: Buffer.from(agentScript),
+      },
+    ]);
+
+    // Step 7: Run the agent script
+    console.log(`[Sandbox] Running agent...`);
+
+    const agentRun = await sandbox.runCommand({
+      cmd: "node",
+      args: ["agent-task.mjs"],
+      env: {
+        ANTHROPIC_API_KEY: apiKey,
+      },
+      stderr: process.stderr,
+      stdout: process.stdout,
+    });
+
     const duration = Date.now() - startTime;
 
-    if (hasError) {
+    // Step 8: Read the result file (readFile returns a ReadableStream)
+    let result = { success: false, output: "", errors: [] as string[] };
+
+    try {
+      const resultStream = await sandbox.readFile({ path: "/vercel/sandbox/result.json" });
+      if (resultStream) {
+        // Consume the stream to get the file contents
+        const chunks: Buffer[] = [];
+        for await (const chunk of resultStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const resultContent = Buffer.concat(chunks).toString();
+        result = JSON.parse(resultContent);
+        console.log(`[Sandbox] Result file read successfully`);
+      }
+    } catch (readError) {
+      // Result file may not exist if agent crashed early
+      console.log(`[Sandbox] Could not read result file: ${readError instanceof Error ? readError.message : String(readError)}`);
+    }
+
+    // Cleanup
+    console.log(`[Sandbox] Stopping sandbox...`);
+    await sandbox.stop();
+
+    if (agentRun.exitCode !== 0 && !result.success) {
       return {
-        output: fullOutput,
+        output: result.output,
         success: false,
-        error: errorMessages.join(", "),
+        error: result.errors?.join(", ") || `Exit code: ${agentRun.exitCode}`,
         duration,
       };
     }
 
-    console.log(`[Agent] Completed successfully in ${duration}ms`);
+    console.log(`[Sandbox] Completed successfully in ${duration}ms`);
     return {
-      output: fullOutput || "Task completed",
-      success: true,
+      output: result.output || "Task completed",
+      success: result.success,
+      error: result.errors?.length ? result.errors.join(", ") : undefined,
       duration,
     };
-
   } catch (error) {
     const duration = Date.now() - startTime;
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[Agent] Error: ${errorMsg}`);
+    console.error(`[Sandbox] Error: ${errorMsg}`);
+
+    // Cleanup on error
+    if (sandbox) {
+      try {
+        await sandbox.stop();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
 
     return {
       output: "",

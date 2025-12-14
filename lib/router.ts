@@ -1,24 +1,18 @@
 /**
  * Task Router
- * Routes incoming tasks to the appropriate MCP profile using keyword/pattern matching.
- * Falls back to general profile when no match found.
- * (Task execution uses Claude Code with OAuth - no API key needed here)
+ * Routes incoming tasks to the appropriate MCP profile using LLM classification.
+ * Uses Claude Haiku for fast, intelligent routing (~100-200ms).
  */
 
+import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
-
-interface ProfileTriggers {
-  keywords: string[];
-  patterns: string[];
-}
 
 interface Profile {
   name: string;
   description: string;
   mcps: string[];
-  triggers: ProfileTriggers;
 }
 
 interface ProfilesConfig {
@@ -37,6 +31,16 @@ interface RoutingResult {
 // Cache for loaded profiles
 let profilesCache: ProfilesConfig | null = null;
 
+// Anthropic client (lazy init)
+let anthropicClient: Anthropic | null = null;
+
+function getAnthropicClient(): Anthropic {
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic();
+  }
+  return anthropicClient;
+}
+
 /**
  * Load profiles from YAML config
  */
@@ -52,83 +56,118 @@ function loadProfiles(): ProfilesConfig {
 }
 
 /**
- * Phase 1: Fast keyword/pattern matching
+ * Build the routing prompt with available profiles
  */
-function matchKeywords(
+function buildRoutingPrompt(profiles: ProfilesConfig): string {
+  const profileDescriptions = Object.entries(profiles.profiles)
+    .map(([id, profile]) => {
+      return `- **${id}**: ${profile.description} (MCPs: ${profile.mcps.join(", ")})`;
+    })
+    .join("\n");
+
+  return `You are a task router. Classify the user's task into the most appropriate profile.
+
+Available profiles:
+${profileDescriptions}
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{
+  "profile": "profile_id",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}
+
+Rules:
+- Choose the profile whose MCPs are most relevant to the task
+- If the task involves web research, searching, or finding information → research
+- If the task involves CRM, sales, clients, meetings → crm
+- If the task involves personal reminders, todos, scheduling → personal
+- If the task involves code, bugs, PRs, development → dev
+- If the task involves notes, documentation, ideas → notes
+- If the task involves messaging, communication → comms
+- If unclear or general → general
+- confidence: 0.9+ for clear matches, 0.7-0.9 for likely matches, <0.7 for uncertain`;
+}
+
+/**
+ * Route task using Claude Haiku for intelligent classification
+ */
+async function routeWithLLM(
   task: string,
   profiles: ProfilesConfig
-): RoutingResult | null {
-  const taskLower = task.toLowerCase();
-  let bestMatch: { profile: string; score: number; keyword: string } | null =
-    null;
+): Promise<RoutingResult> {
+  const client = getAnthropicClient();
+  const systemPrompt = buildRoutingPrompt(profiles);
 
-  for (const [profileId, profile] of Object.entries(profiles.profiles)) {
-    // Skip the general/fallback profile for keyword matching
-    if (profileId === "general") continue;
+  console.log("[Router] Classifying task with Haiku...");
+  const startTime = Date.now();
 
-    // Check keywords
-    for (const keyword of profile.triggers.keywords) {
-      if (taskLower.includes(keyword.toLowerCase())) {
-        const score = keyword.length; // Longer keywords = more specific match
-        if (!bestMatch || score > bestMatch.score) {
-          bestMatch = { profile: profileId, score, keyword };
-        }
-      }
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 150,
+      system: systemPrompt,
+      messages: [{ role: "user", content: task }],
+    });
+
+    const duration = Date.now() - startTime;
+    console.log(`[Router] Classification took ${duration}ms`);
+
+    // Extract text response
+    const textBlock = response.content.find((block) => block.type === "text");
+    if (!textBlock || textBlock.type !== "text") {
+      throw new Error("No text response from router");
     }
 
-    // Check regex patterns
-    for (const pattern of profile.triggers.patterns) {
-      try {
-        const regex = new RegExp(pattern, "i");
-        if (regex.test(task)) {
-          // Pattern matches get high confidence
-          return {
-            profile: profileId,
-            mcps: profile.mcps,
-            confidence: 0.9,
-            reasoning: `Pattern match: "${pattern}"`,
-          };
-        }
-      } catch {
-        console.warn(`Invalid regex pattern in profile ${profileId}: ${pattern}`);
-      }
-    }
-  }
+    // Parse JSON response
+    const result = JSON.parse(textBlock.text) as {
+      profile: string;
+      confidence: number;
+      reasoning: string;
+    };
 
-  if (bestMatch) {
-    const profile = profiles.profiles[bestMatch.profile];
+    // Validate profile exists
+    if (!profiles.profiles[result.profile]) {
+      console.warn(`[Router] Unknown profile "${result.profile}", using default`);
+      const defaultProfile = profiles.profiles[profiles.default_profile];
+      return {
+        profile: profiles.default_profile,
+        mcps: defaultProfile.mcps,
+        confidence: 0.5,
+        reasoning: `Unknown profile returned, fallback to default`,
+      };
+    }
+
+    const profile = profiles.profiles[result.profile];
     return {
-      profile: bestMatch.profile,
+      profile: result.profile,
       mcps: profile.mcps,
-      confidence: 0.8,
-      reasoning: `Keyword match: "${bestMatch.keyword}"`,
+      confidence: result.confidence,
+      reasoning: result.reasoning,
+    };
+  } catch (error) {
+    console.error("[Router] LLM routing failed:", error);
+    // Fallback to default profile on error
+    const defaultProfile = profiles.profiles[profiles.default_profile];
+    return {
+      profile: profiles.default_profile,
+      mcps: defaultProfile.mcps,
+      confidence: 0.3,
+      reasoning: `LLM routing failed: ${error instanceof Error ? error.message : "unknown error"}`,
     };
   }
-
-  return null;
 }
 
 /**
  * Main routing function
- * Uses keyword/pattern matching, falls back to general profile
+ * Uses LLM classification for intelligent routing
  */
 export async function routeTask(task: string): Promise<RoutingResult> {
   const profiles = loadProfiles();
 
-  // Try keyword/pattern matching (fast, no API call)
-  const keywordMatch = matchKeywords(task, profiles);
-  if (keywordMatch) {
-    console.log(`[Router] Keyword match: ${keywordMatch.profile}`);
-    return keywordMatch;
-  }
+  // Use LLM for intelligent routing
+  const result = await routeWithLLM(task, profiles);
+  console.log(`[Router] Selected: ${result.profile} (${result.confidence}) - ${result.reasoning}`);
 
-  // No match - use general profile (task execution uses Claude Code with OAuth)
-  console.log("[Router] No keyword match, using general profile");
-  const defaultProfile = profiles.profiles[profiles.default_profile];
-  return {
-    profile: profiles.default_profile,
-    mcps: defaultProfile.mcps,
-    confidence: 0.5,
-    reasoning: "No keyword match - using general profile",
-  };
+  return result;
 }

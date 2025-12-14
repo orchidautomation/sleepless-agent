@@ -30,11 +30,9 @@ mcps:
 
   notion:
     name: "Notion"
-    type: "npx"
-    command: "@anthropic/mcp-notion"
-    env:
-      NOTION_API_KEY: "${NOTION_API_KEY}"
-    description: "Notes and documentation"
+    type: "http"
+    url: "https://mcp.notion.com/mcp"
+    description: "Notes, pages, databases (uses OAuth - no API key needed in config)"
 
   todoist:
     name: "Todoist"
@@ -60,13 +58,19 @@ mcps:
       LINEAR_API_KEY: "${LINEAR_API_KEY}"
     description: "Issue tracking for work"
 
-  web-search:
-    name: "Web Search"
-    type: "npx"
-    command: "@anthropic/mcp-web-search"
-    env:
-      TAVILY_API_KEY: "${TAVILY_API_KEY}"
-    description: "Search the web"
+  exa:
+    name: "Exa"
+    type: "http"
+    url: "https://mcp.exa.ai/mcp?exaApiKey=${EXA_API_KEY}&tools=web_search_exa,get_code_context_exa,crawling_exa,company_research_exa,linkedin_search_exa,deep_researcher_start,deep_researcher_check"
+    description: "AI-powered web search, company research, LinkedIn search, code context, deep research"
+    tools:
+      - web_search_exa
+      - get_code_context_exa
+      - crawling_exa
+      - company_research_exa
+      - linkedin_search_exa
+      - deep_researcher_start
+      - deep_researcher_check
 
   gmail:
     name: "Gmail"

@@ -1,496 +1,521 @@
-<div align="center">
+# Personal Life OS
 
-# Sleepless Agent
+A cloud-based personal AI assistant powered by Claude Code running in Vercel Sandboxes. Fire off ideas from anywhere (HTTP, Slack, voice memos), and it orchestrates your tools (CRM, calendar, notes, etc.) to make things happen.
 
-**A 24/7 AgentOS that works while you sleep**
+**Key idea**: Instead of loading all your MCPs at once (which confuses Claude), this system routes tasks to specific "profiles" that load only the relevant MCPs. A `CLAUDE.md` file acts as Claude's "operating manual" for your life.
 
-[![Documentation](https://img.shields.io/badge/Documentation-007ACC?style=for-the-badge&logo=markdown&logoColor=white)](https://context-machine-lab.github.io/sleepless-agent/)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-582C83?style=for-the-badge&logo=wikipedia&logoColor=white)](https://deepwiki.com/context-machine-lab/sleepless-agent)
-[![WeChat](https://img.shields.io/badge/WeChat-07C160?style=for-the-badge&logo=wechat&logoColor=white)](./assets/wechat.jpg)
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/74my3Wkn)
+## Table of Contents
 
-</div>
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Project Structure](#project-structure)
+- [Setup Guide](#setup-guide)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Customization](#customization)
+- [Development Phases](#development-phases)
+- [Extending the System](#extending-the-system)
+- [Troubleshooting](#troubleshooting)
 
-Have Claude Code Pro but not using it at night? Transform it into an AgentOS that handles your ideas and tasks while you sleep. This is a 24/7 AI assistant daemon powered by Claude Code CLI and Python Agent SDK that processes both random thoughts and serious tasks via Slack with isolated workspaces.
+---
 
-## 📰 News
+## Architecture
 
-- **[2025-10-26]** 🎉 Initial release v0.1.0 - Full AgentOS with multi-agent workflow support
-- **[2025-10-25]** 🚀 Added task auto-generation with configurable strategies
-- **[2025-10-24]** 🔧 Integrated Git management with automatic PR creation
-- **[2025-10-23]** 📊 Implemented isolated workspaces for parallel task execution
-- **[2025-10-22]** 💡 Added Claude Code Python Agent SDK integration
+```
+┌─────────────────────────────────────────────────────────┐
+│  Inputs (anywhere)                                      │
+│  - HTTP API (webhooks, Zapier, iOS Shortcuts)          │
+│  - Slack commands (future)                             │
+│  - Voice memo transcription (future)                   │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  POST /api/task                                         │
+│  1. Authenticate request                               │
+│  2. Route task → select MCP profile                    │
+│  3. Spin up Vercel Sandbox                             │
+│  4. Load CLAUDE.md + relevant MCPs only                │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Vercel Sandbox (Firecracker microVM)                  │
+│  - Claude Code CLI installed                           │
+│  - Full agentic loop (planning, tools, retries)        │
+│  - File tools (Read, Write, Edit, Bash)                │
+│  - Dynamic MCPs based on task profile                  │
+│  - Your Claude Max subscription via OAuth              │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Results                                                │
+│  - Stored in Vercel Blob (persistent)                  │
+│  - Webhook callback (optional)                         │
+│  - Return response to caller                           │
+└─────────────────────────────────────────────────────────┘
+```
 
-## 🎬 Demo
+### Why Vercel Sandbox?
 
-<div align="center">
-  <img src="assets/cli.png" alt="Sleepless Agent CLI Demo" width="800">
-  <p><em>Sleepless Agent CLI in action - managing tasks, checking status, and generating reports</em></p>
-</div>
+- **No local machine required** — runs entirely in the cloud
+- **Isolation** — each task runs in its own Firecracker microVM
+- **Up to 5 hours runtime** on Pro plan
+- **Pay for active CPU time** only (Fluid compute model)
+- **Claude Code CLI** works natively in the sandbox
 
-### Quick Example
+### Why MCP Profiles?
+
+Loading 10+ MCPs at once causes:
+- Decision paralysis (which tool do I use?)
+- Similar tools confusion (which calendar? which notes app?)
+- Token overhead (slower, more expensive)
+
+**Solution**: Route tasks to profiles that load only 2-4 relevant MCPs.
+
+---
+
+## How It Works
+
+### Example Flow
+
+```
+You: "Had coffee with Sarah from TechCorp, she's interested in the API product"
+
+1. POST /api/task receives this
+2. Router detects keywords: "with", "interested in" → CRM profile
+3. CRM profile loads: hubspot, google-calendar, slack
+4. Vercel Sandbox spins up with Claude Code + those MCPs
+5. Claude reads CLAUDE.md (knows your preferences, workflows)
+6. Claude executes:
+   - Creates/updates HubSpot contact for Sarah
+   - Logs meeting note with discussion points
+   - Schedules follow-up calendar event
+   - Posts summary to #sales Slack channel
+7. Returns: "Done: Created contact, logged meeting, follow-up scheduled for Thursday"
+```
+
+### The Router
+
+Two-phase routing for speed and accuracy:
+
+1. **Fast path**: Keyword matching (no LLM call)
+   - "call with" → CRM profile
+   - "remind me" → Personal profile
+   - "bug" → Dev profile
+
+2. **Fallback**: LLM classification (Haiku, ~100ms)
+   - Ambiguous tasks get classified by a fast, cheap model
+   - Returns profile + confidence score
+
+---
+
+## Project Structure
+
+```
+personal-os/
+├── api/
+│   └── task.ts              # Main HTTP endpoint
+├── lib/
+│   ├── router.ts            # Task → profile routing (keywords + LLM fallback)
+│   └── sandbox.ts           # Vercel Sandbox executor with MCP loading
+├── config/
+│   ├── profiles.yaml        # MCP profile definitions
+│   └── mcps.yaml            # MCP server configurations
+├── workspace/
+│   └── CLAUDE.md            # Claude's operating manual (CUSTOMIZE THIS!)
+├── package.json
+├── vercel.json
+├── tsconfig.json
+├── .env.example
+└── .gitignore
+```
+
+### Key Files Explained
+
+| File | Purpose |
+|------|---------|
+| `api/task.ts` | HTTP endpoint — receives tasks, authenticates, routes, executes in sandbox |
+| `lib/router.ts` | Classifies tasks into profiles via keywords or LLM |
+| `lib/sandbox.ts` | Creates Vercel Sandbox, installs Claude Code CLI, configures MCPs |
+| `config/profiles.yaml` | Defines profiles: which MCPs to load, trigger keywords |
+| `config/mcps.yaml` | MCP connection details: commands, environment variables |
+| `workspace/CLAUDE.md` | **Your personal OS brain** — tells Claude how to use your tools |
+
+---
+
+## Setup Guide
+
+### Prerequisites
+
+- Node.js 20+
+- Vercel account (Pro recommended for 5hr sandbox runtime)
+- Anthropic API key
+- MCP credentials (HubSpot, Google, Slack, etc.)
+
+### Installation
 
 ```bash
-# Start the daemon
-$ sle daemon
-2025-10-26 03:30:12 | INFO | Sleepless Agent starting...
-2025-10-26 03:30:12 | INFO | Slack bot connected
+# Clone the repo
+cd personal-os
 
-# Submit a task via Slack
-/think Implement OAuth2 authentication -p backend
+# Install dependencies
+npm install
 
-# Check status
-$ sle check
-╭─────────────────── System Status ───────────────────╮
-│ 🟢 Daemon: Running                                  │
-│ 📊 Queue: 3 pending, 1 in_progress                  │
-│ 💻 Usage: 45% (Day threshold: 95%)                  │
-│ 🔄 Last task: "Implement OAuth2..." (in progress)   │
-╰─────────────────────────────────────────────────────╯
+# Copy environment template
+cp .env.example .env.local
 
-# View results
-$ sle report 42
-Task #42: ✅ Completed
-Branch: feature/backend-42
-PR: https://github.com/user/repo/pull/123
+# Fill in your API keys (see .env.example for all required keys)
 ```
 
-## ✨ Features
-
-- 🤖 **Continuous Operation**: Runs 24/7 daemon, always ready for new tasks
-- 💬 **Slack Integration**: Submit tasks via Slack commands
-- 🎯 **Hybrid Autonomy**: Auto-applies random thoughts, requires review for serious tasks
-- ⚡ **Smart Scheduling**: Optimizes task execution based on priorities
-- 📊 **Task Queue**: SQLite-backed persistent task management
-- 🔌 **Claude Code SDK**: Uses Python Agent SDK to interface with Claude Code CLI
-- 🏗️ **Isolated Workspaces**: Each task gets its own workspace for true parallelism
-- 📝 **Result Storage**: All outputs saved with metadata for future reference
-
-## ⚙️ Prerequisites
-
-- Python 3.11+
-- Slack workspace admin access
-- Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
-- Git (for auto-commits)
-- gh CLI (optional, for PR automation)
-
-## 🚀 Quick Start
-
-### 1. Install
+### Vercel Setup
 
 ```bash
-pip install sleepless-agent
+# Install Vercel CLI
+npm i -g vercel
+
+# Link to your Vercel project
+vercel link
+
+# Pull environment (creates OIDC token for sandbox auth)
+vercel env pull
+
+# Note: OIDC token expires after 12 hours, re-run `vercel env pull` as needed
 ```
 
-Or for development:
-```bash
-git clone <repo>
-cd sleepless-agent
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -e .
-```
-
-### 2. Setup Slack App
-
-Visit https://api.slack.com/apps and create a new app:
-
-**Basic Information**
-- Choose "From scratch"
-- Name: "Sleepless Agent"
-- Pick your workspace
-
-**Enable Socket Mode**
-- Settings > Socket Mode > Toggle ON
-- Generate app token (starts with `xapp-`)
-
-**Create Slash Commands**
-Settings > Slash Commands > Create New Command:
-- `/think` - Capture thought or task (use `-p project-name` for serious tasks)
-- `/check` - Check queue status
-- `/cancel` - Cancel task or project
-- `/report` - Show reports or task details
-- `/trash` - Manage trash (list, restore, empty)
-
-**OAuth Scopes**
-Features > OAuth & Permissions > Bot Token Scopes:
-- `chat:write`
-- `commands`
-- `app_mentions:read`
-
-**Install App**
-- Install to workspace
-- Get bot token (starts with `xoxb-`)
-
-### 3. Configure Environment
+### Local Development
 
 ```bash
-cp .env.example .env
-nano .env  # Edit with your tokens
+# Start local dev server
+vercel dev
+
+# Test the endpoint
+curl -X POST http://localhost:3000/api/task \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-secret-key" \
+  -d '{"task": "Remind me to call mom tomorrow"}'
 ```
 
-Set:
-- `SLACK_BOT_TOKEN` - xoxb-... token
-- `SLACK_APP_TOKEN` - xapp-... token
-
-(Claude API key no longer needed - uses Claude Code CLI)
-
-### 4. Run
+### Deploy
 
 ```bash
-sle daemon
+# Deploy to preview
+vercel deploy
+
+# Deploy to production
+vercel deploy --prod
 ```
 
-You should see startup logs similar to:
-```
-2025-10-24 23:30:12 | INFO     | sleepless_agent.interfaces.bot.start:50 Slack bot started and listening for events
-2025-10-24 23:30:12 | INFO     | sleepless_agent.runtime.daemon.run:178 Sleepless Agent starting...
-```
-Logs are rendered with Rich for readability; set `SLEEPLESS_LOG_LEVEL=DEBUG` to increase verbosity.
+---
 
+## Configuration
 
-## 💬 Slack Commands
+### Environment Variables
 
-All Slack commands align with the CLI commands for consistency:
-
-### 📋 Task Management
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `/think` | Capture random thought | `/think Explore async ideas` |
-| `/think -p <project>` | Add serious task to project | `/think Add OAuth2 support -p backend` |
-| `/check` | Show system status | `/check` |
-| `/cancel` | Cancel task or project | `/cancel 5` or `/cancel my-app` |
-
-### 📊 Reporting & Trash
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `/report` | Today's report, task details, date/project report, or list all | `/report`, `/report 42`, `/report 2025-10-22`, `/report my-app`, `/report --list` |
-| `/trash` | List, restore, or empty trash | `/trash list`, `/trash restore my-app`, `/trash empty` |
-
-## ⌨️ Command Line Interface
-
-Install the project (or run within the repo) and use the bundled CLI:
-
-```bash
-python -m sleepless_agent.interfaces.cli think "Ship release checklist" -p my-app
-# or, after installing the package:
-sle check
-```
-
-The CLI mirrors the Slack slash commands:
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `think <description>` | Capture a random thought | `think "Explore async patterns"` |
-| `think <description> -p <project>` | Queue a serious task to project | `think "Build onboarding flow" -p backend` |
-| `check` | Show system health, queue, and performance metrics | `check` |
-| `report [identifier]` | Show task details, daily reports, or project summaries (`--list` for all reports) | `report 7` |
-| `cancel <identifier>` | Move a task or project to trash | `cancel 9` or `cancel my-app` |
-| `trash [subcommand] [identifier]` | Manage trash (list, restore, empty) | `trash restore my-app` |
-
-Override storage locations when needed:
-
-```bash
-sle --db-path ./tmp/tasks.db --results-path ./tmp/results check
-```
-
-## 🏗️ Architecture
-
-```
-Slack Bot
-    ↓
-Slack Commands → Task Queue (SQLite)
-    ↓
-Agent Daemon (Event Loop)
-    ↓
-Claude Executor (Claude Code CLI)
-    ↓
-Result Manager (Storage + Git)
-```
-
-### Components
-
-- **daemon.py**: Main event loop, task orchestration
-- **bot.py**: Slack interface, command parsing
-- **task_queue.py**: Task CRUD, priority scheduling
-- **claude_code_executor.py**: Python Agent SDK wrapper with isolated workspace management
-- **results.py**: Result storage, file management
-- **models.py**: SQLAlchemy models for Task, Result
-- **config.yaml**: Configuration defaults
-- **git_manager.py**: Git automation (commits, PRs)
-- **monitor.py**: Health checks and metrics
-
-## 📁 File Structure
-
-```
-sleepless-agent/
-├── src/sleepless_agent/
-│   ├── __init__.py
-│   ├── daemon.py           # Main event loop
-│   ├── bot.py              # Slack interface
-│   ├── task_queue.py       # Task management
-│   ├── claude_code_executor.py  # Claude CLI wrapper
-│   ├── scheduler.py        # Smart scheduling
-│   ├── git_manager.py      # Git automation
-│   ├── monitor.py          # Health & metrics
-│   ├── models.py           # Database models
-│   ├── results.py          # Result storage
-│   └── config.yaml         # Config defaults
-├── workspace/              # All persistent data and task workspaces
-│   ├── data/               # Persistent storage
-│   │   ├── tasks.db        # SQLite database
-│   │   ├── results/        # Task output files
-│   │   ├── reports/        # Daily markdown reports
-│   │   ├── agent.log       # Application logs
-│   │   └── metrics.jsonl   # Performance metrics
-│   ├── tasks/              # Task workspaces (task_1/, task_2/, etc.)
-│   ├── projects/           # Project workspaces
-│   └── trash/              # Soft-deleted projects
-├── .env                    # Secrets (not tracked)
-├── pyproject.toml          # Python package metadata & dependencies
-├── README.md              # This file
-└── docs/                  # Additional documentation
-```
-
-## ⚙️ Configuration
-
-Runtime settings come from environment variables loaded via `.env` (see `.env.example`). Update those values or export them in your shell to tune agent behavior.
-
-### Usage Management
-
-The agent automatically monitors Claude Code usage and intelligently manages task execution based on configurable thresholds.
-
-**How it works:**
-
-1. **Usage Monitoring** - Every task checks usage via `claude /usage` command
-2. **Time-based Thresholds** - Different thresholds for day and night operations
-3. **Smart Scheduling** - Automatically pauses task generation when threshold is reached
-4. **Automatic Resume** - Tasks resume when usage resets
-
-**Time-Based Configuration (configurable in `config.yaml`):**
-- **Nighttime (1 AM - 9 AM by default):** 96% threshold - agent works aggressively while you sleep
-- **Daytime (9 AM - 1 AM by default):** 95% threshold - preserves capacity for your manual usage
-- Configure via: `claude_code.threshold_day`, `claude_code.threshold_night`
-- Time ranges via: `claude_code.night_start_hour`, `claude_code.night_end_hour`
-
-**Visibility:**
-- Dashboard: Shows usage percentage in `sle check`
-- Logs: Each usage check logs current usage with applicable threshold
-- Config: All thresholds and time ranges adjustable in `config.yaml`
-
-**Behavior at threshold:**
-- ⏸️ New task generation pauses at threshold
-- ✅ Running tasks complete normally
-- 📋 Pending tasks wait in queue
-- ⏱️ Automatic resume when usage resets
-
-### Git Management
-
-The agent integrates deeply with Git for automatic version control and collaboration:
-
-**Remote Repository Configuration (`config.yaml`):**
-- `git.use_remote_repo`: Enable/disable remote repository integration
-- `git.remote_repo_url`: Your remote repository URL (e.g., `git@github.com:username/repo.git`)
-- `git.auto_create_repo`: Automatically create repository if it doesn't exist
-
-**Git Workflow:**
-- **Random Thoughts**: Auto-commits to `thought-ideas` branch
-- **Serious Tasks (-p flag)**: Creates feature branches (`feature/<project>-<task_id>`) and opens PRs
-- **Automatic Commits**: Each task completion triggers a commit with descriptive messages
-- **PR Creation**: Serious tasks automatically create pull requests for review
-
-**Important:** Update `git.remote_repo_url` in `config.yaml` before running the agent!
-
-### Multi-Agent Workflow
-
-The agent employs a sophisticated multi-agent architecture for complex task processing:
-
-**Agent Types (`config.yaml`):**
-- **Planner Agent**: Analyzes tasks and creates execution plans (max 3 turns by default)
-- **Worker Agent**: Executes the planned tasks (max 3 turns by default)
-- **Evaluator Agent**: Reviews and validates completed work (max 3 turns by default)
-
-**Configuration:**
-```yaml
-multi_agent_workflow:
-  planner:
-    enabled: true
-    max_turns: 3
-  worker:
-    enabled: true
-    max_turns: 3
-  evaluator:
-    enabled: true
-    max_turns: 3
-```
-
-Each agent can be independently enabled/disabled and configured with different turn limits to control execution depth.
-
-### Task Auto-Generation
-
-The agent can automatically generate tasks to keep itself productive during idle time:
-
-**Generation Strategies (`config.yaml`):**
-- **refine_focused (45% weight)**: Focuses on completing or improving existing work
-- **balanced (35% weight)**: Mix of refinements and new tasks based on workspace state
-- **new_friendly (20% weight)**: Prioritizes creating innovative new projects
-
-**Task Types:**
-- **[NEW]**: Creates a new task in an isolated workspace (`workspace/tasks/<task_id>/`)
-- **[REFINE:#<id>]**: Improves specific existing task (reuses task workspace)
-- **[REFINE]**: General refinement of workspace projects
-
-**Workspace Constraints:**
-- Each task executes in its own isolated directory
-- Tasks only access their workspace and `workspace/shared/`
-- System directories (`workspace/data/`) are protected
-- REFINE tasks reuse existing workspaces for continuity
-
-
-## 🔧 Environment Variables
+See `.env.example` for the full list. Key ones:
 
 ```bash
 # Required
+ANTHROPIC_API_KEY=sk-ant-...      # For router LLM calls
+PERSONAL_OS_API_KEY=your-secret   # Auth for /api/task
+
+# Per MCP (add what you use)
+HUBSPOT_ACCESS_TOKEN=pat-...
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
+NOTION_API_KEY=secret_...
+TODOIST_API_TOKEN=...
+GITHUB_TOKEN=ghp_...
+# etc.
 ```
 
-**Note:** Most configuration is done via `config.yaml`. Environment variables are primarily for secrets and deployment-specific settings.
+### Profiles (`config/profiles.yaml`)
 
-## 📝 Task Types
+Profiles define which MCPs load for each task category:
 
-The agent intelligently processes different task types:
+```yaml
+profiles:
+  crm:
+    name: "CRM & Sales"
+    description: "Sales calls, contact management, follow-ups"
+    mcps:
+      - hubspot
+      - google-calendar
+      - slack
+    triggers:
+      keywords:
+        - "call with"
+        - "meeting with"
+        - "sales"
+        - "follow up"
+      patterns:
+        - ".*\\b(met|spoke|called)\\b.*\\b(with|to)\\b.*"
 
-1. **Random Thoughts** - Auto-commits to `thought-ideas` branch
-   ```
-   /think Research async patterns in Rust
-   /think What's the best way to implement caching?
-   ```
-
-2. **Serious Tasks** - Creates feature branch and PR, requires review (use `-p` flag)
-   ```
-   /think -p backend Add authentication to user service
-   /think -p payments Refactor payment processing module
-   ```
-
-## 📊 Monitoring
-
-### Slack Commands
-```
-/check    # System status and performance stats
-/report --list  # Available reports
-```
-
-## 🚢 Deployment
-
-### Linux (systemd)
-```bash
-make install-service
-sudo systemctl start sleepless-agent
-```
-
-### macOS (launchd)
-```bash
-make install-launchd
-launchctl list | grep sleepless
+  personal:
+    name: "Personal"
+    description: "Personal tasks, reminders, life admin"
+    mcps:
+      - todoist
+      - google-calendar
+    triggers:
+      keywords:
+        - "remind me"
+        - "todo"
+        - "need to"
 ```
 
-## 💡 Example Workflows
+### MCPs (`config/mcps.yaml`)
 
-### Daily Brainstorm
-```
-/think Research new Rust async libraries
-/think Compare Python web frameworks
-/think Ideas for improving API performance
-/check
-```
+Define how to connect to each MCP:
 
-### Production Fix
-```
-/think Fix authentication bug in login endpoint -p backend
-/report <id>     # Get the PR link
-# Review and merge PR
-```
+```yaml
+mcps:
+  hubspot:
+    name: "HubSpot"
+    type: "npx"
+    command: "@hubspot/mcp-server"
+    env:
+      HUBSPOT_ACCESS_TOKEN: "${HUBSPOT_ACCESS_TOKEN}"
 
-### Code Audit
-```
-/think Security audit of user service -p backend
-/think Performance analysis of payment module -p payments
+  slack:
+    name: "Slack"
+    type: "npx"
+    command: "@anthropic/mcp-slack"
+    env:
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
 ```
 
-## ⚡ Performance Tips
+---
 
-1. **Use thoughts to fill idle time** - Maximizes usage
-2. **Batch serious tasks** - Reduces context switching
-3. **Monitor usage** - Watch scheduler logs for usage patterns
-4. **Review git history** - Check `thought-ideas` branch regularly
-5. **Check metrics** - Run `sle check` to track performance
+## API Reference
 
-## 📦 Releases
+### POST /api/task
 
-- Latest stable: **0.1.0** – published on [PyPI](https://pypi.org/project/sleepless-agent/0.1.0/)
-- Install or upgrade with `pip install -U sleepless-agent`
-- Release notes tracked via GitHub Releases (tag `v0.1.0` onward)
+Execute a task with Claude Code.
 
-## 📚 Documentation
+**Headers:**
+```
+Content-Type: application/json
+x-api-key: your-secret-key
+```
 
-For more detailed information and guides:
-
-- **[Full Documentation](https://context-machine-lab.github.io/sleepless-agent/)** - Complete documentation site
-- **[DeepWiki](https://deepwiki.com/context-machine-lab/sleepless-agent)** - Interactive knowledge base
-- **[Installation Guide](docs/installation.md)** - Detailed setup instructions
-- **[Quick Start](docs/quickstart.md)** - Get up and running quickly
-- **[FAQ](docs/faq.md)** - Frequently asked questions
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-
-## 🗺️ Roadmap
-
-- [ ] **Advanced Scheduling** - Priority queue with time-based and dependency scheduling
-- [ ] **Daily Report** - Daily report of the agent's work
-
-## 🙏 Acknowledgements
-
-We are deeply grateful to the open-source community and the projects that make Sleepless Agent possible:
-
-- **[Claude Code CLI](https://github.com/anthropics/claude-code)** - For providing the powerful foundation for AI-assisted development and the Python Agent SDK that enables seamless integration
-- **[Slack Bolt](https://github.com/slackapi/bolt-python)** - For reliable real-time messaging and command handling that powers our Slack integration
-- **[SQLAlchemy](https://www.sqlalchemy.org/)** - For robust data persistence and elegant ORM that manages our task queue
-- **[Rich](https://github.com/Textualize/rich)** - For beautiful terminal rendering that makes logs and outputs visually appealing
-- **[GitPython](https://github.com/gitpython-developers/GitPython)** - For comprehensive Git operations that enable our automated version control workflows
-
-## 🤝 Contributing
-
-We welcome contributions! Sleepless Agent is designed to be a community resource for 24/7 AI development automation.
-
-Please see our [Contributing Guidelines](CONTRIBUTING.md) for:
-- Development setup and environment configuration
-- Code style and testing requirements
-- How to submit pull requests
-- Community guidelines and code of conduct
-
-Feel free to:
-- 🐛 [Report bugs](https://github.com/context-machine-lab/sleepless-agent/issues/new?labels=bug)
-- 💡 [Suggest features](https://github.com/context-machine-lab/sleepless-agent/issues/new?labels=enhancement)
-- 💬 [Ask questions](https://github.com/context-machine-lab/sleepless-agent/discussions)
-- 🔧 [Submit pull requests](https://github.com/context-machine-lab/sleepless-agent/pulls)
-
-## 📖 Citation
-
-If you use Sleepless Agent in your research or projects, please cite:
-
-```bibtex
-@software{sleepless_agent_2025,
-  title = {Sleepless Agent: A 24/7 AgentOS for Continuous Development},
-  author = {Zhimeng Guo, Hangfan Zhang, Siyuan Xu, Huaisheng Zhu, Teng Xiao, Minhao Cheng},
-  year = {2025},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  url = {https://github.com/context-machine-lab/sleepless-agent}
+**Request Body:**
+```json
+{
+  "task": "Had coffee with Sarah from TechCorp, interested in API",
+  "context": {                    // Optional additional context
+    "duration": "30min",
+    "location": "Blue Bottle"
+  },
+  "profile": "crm",               // Optional: force specific profile
+  "mcps": ["hubspot", "slack"],   // Optional: force specific MCPs
+  "webhook": "https://...",       // Optional: callback URL when done
+  "async": false                  // Optional: return immediately, process in background
 }
 ```
 
-## 📄 License
+**Response (sync):**
+```json
+{
+  "id": "task_1234567890_abc123",
+  "status": "completed",
+  "profile": "crm",
+  "mcps": ["hubspot", "google-calendar", "slack"],
+  "result": "Done:\n- Created contact Sarah (TechCorp)\n- Logged meeting note\n- Scheduled follow-up for Thursday",
+  "duration": 45000
+}
+```
 
-Released under the [MIT License](LICENSE)
+**Response (async):**
+```json
+{
+  "id": "task_1234567890_abc123",
+  "status": "queued",
+  "profile": "crm",
+  "mcps": ["hubspot", "google-calendar", "slack"]
+}
+```
+
+---
+
+## Customization
+
+### CLAUDE.md — The Most Important File
+
+`workspace/CLAUDE.md` is Claude's operating manual. Customize it with:
+
+1. **About you** — Name, work, timezone, communication style
+2. **MCP usage guide** — When to use each tool
+3. **Common workflows** — Step-by-step patterns (after a call, new idea, etc.)
+4. **Decision frameworks** — Which task system? Which notes app?
+5. **Key people** — Frequent contacts and how to handle them
+6. **Preferences** — Meeting times, video call platform, etc.
+
+The more specific you are, the less Claude will ask clarifying questions.
+
+### Adding a New MCP
+
+1. Add to `config/mcps.yaml`:
+   ```yaml
+   new-mcp:
+     name: "New MCP"
+     type: "npx"
+     command: "@someone/mcp-new"
+     env:
+       NEW_MCP_TOKEN: "${NEW_MCP_TOKEN}"
+   ```
+
+2. Add to relevant profiles in `config/profiles.yaml`:
+   ```yaml
+   profiles:
+     some-profile:
+       mcps:
+         - new-mcp
+   ```
+
+3. Add env var to `.env.local`:
+   ```
+   NEW_MCP_TOKEN=...
+   ```
+
+4. Document in `workspace/CLAUDE.md`:
+   ```markdown
+   ### New MCP
+   **Use for**: ...
+   **Don't use for**: ...
+   ```
+
+### Adding a New Profile
+
+Add to `config/profiles.yaml`:
+
+```yaml
+profiles:
+  finance:
+    name: "Finance"
+    description: "Expenses, invoices, budgeting"
+    mcps:
+      - quickbooks
+      - google-sheets
+    triggers:
+      keywords:
+        - "expense"
+        - "invoice"
+        - "budget"
+        - "payment"
+```
+
+---
+
+## Development Phases
+
+### Phase 1: Core Infrastructure ✅
+- [x] Project structure
+- [x] Vercel Sandbox executor
+- [x] Basic API endpoint
+- [x] CLAUDE.md template
+- [x] MCP profile system
+- [x] Task router (keywords + LLM)
+
+### Phase 2: Integrations (TODO)
+- [ ] Slack slash commands (`/task`, `/status`)
+- [ ] Webhook callbacks
+- [ ] iOS Shortcuts integration guide
+- [ ] Voice memo → transcription → task pipeline
+
+### Phase 3: Persistence (TODO)
+- [ ] Task history in Vercel KV or Postgres
+- [ ] Result retrieval endpoint (`GET /api/task/:id`)
+- [ ] Simple dashboard UI
+
+### Phase 4: Advanced (TODO)
+- [ ] Task queue for background processing
+- [ ] Retry logic with exponential backoff
+- [ ] Usage tracking and limits
+- [ ] Multi-user support
+
+---
+
+## Extending the System
+
+### Add Slack Commands
+
+Create `api/slack.ts`:
+
+```typescript
+// Handle Slack slash commands like /task
+// Verify Slack signature, parse command, call routeTask + executeInSandbox
+// Post result back to Slack channel/thread
+```
+
+### Add Voice Memo Support
+
+1. Use Whisper API to transcribe audio
+2. POST transcription to `/api/task`
+3. Can be triggered via iOS Shortcut or Zapier
+
+### Add Task Queue
+
+For truly async processing:
+
+1. Use Vercel KV or Upstash Redis
+2. POST adds to queue, returns immediately
+3. Vercel Cron or background function processes queue
+
+---
+
+## Troubleshooting
+
+### "Sandbox creation failed"
+
+- Check `vercel env pull` was run recently (OIDC token expires)
+- Verify Vercel Pro plan for longer runtimes
+- Check Vercel dashboard for sandbox limits
+
+### "MCP not working"
+
+- Verify env vars are set in `.env.local`
+- Check MCP package name in `config/mcps.yaml`
+- Test MCP independently: `npx @anthropic/mcp-slack`
+
+### "Wrong profile selected"
+
+- Check `config/profiles.yaml` keywords
+- Add more specific keywords for your use case
+- Use `"profile": "explicit"` in request to force
+
+### "Claude confused about tools"
+
+- Review `workspace/CLAUDE.md` — be more specific
+- Reduce MCPs in the profile
+- Add decision framework for similar tools
+
+---
+
+## Background & Context
+
+This project evolved from [Sleepless Agent](../), a local daemon for 24/7 task processing. Personal OS takes the core ideas (CLAUDE.md, MCP profiles, routing) and makes them cloud-native:
+
+| Feature | Sleepless Agent | Personal OS |
+|---------|-----------------|-------------|
+| Runs on | Local machine | Vercel (cloud) |
+| Input | Slack commands | HTTP API (anything) |
+| Task queue | SQLite | Stateless (or Vercel KV) |
+| Always on | Yes (daemon) | On-demand |
+| Local machine required | Yes | No |
+
+Personal OS is simpler to start with and can grow into Sleepless Agent's functionality if needed.
+
+---
+
+## License
+
+MIT
+
+---
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch
+3. Make your changes
+4. Submit a PR
+
+For major changes, open an issue first to discuss.

@@ -4,7 +4,7 @@
   "description": "Personal Life OS - Cloud-based Claude Code agent with dynamic MCP loading",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "echo 'Run vercel dev directly'",
     "build": "tsc",
     "deploy": "vercel deploy",
     "deploy:prod": "vercel deploy --prod"
@@ -20,6 +20,7 @@
     "@types/ms": "^2.1.0",
     "@types/node": "^22.0.0",
     "@vercel/node": "^5.0.0",
+    "dotenv": "^17.2.3",
     "typescript": "^5.7.0"
   },
   "engines": {

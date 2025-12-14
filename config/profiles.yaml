@@ -31,7 +31,7 @@ profiles:
     name: "Research"
     description: "Research topics, save findings, learn new things"
     mcps:
-      - web-search
+      - exa
       - notion
     triggers:
       keywords:

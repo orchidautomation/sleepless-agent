@@ -249,3 +249,5 @@ Thumbs.db
 
 # Logs
 *.log
+.env*.local
+.env.vercel

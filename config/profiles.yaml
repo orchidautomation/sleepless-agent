@@ -1,142 +1,100 @@
 # MCP Profiles
 # Each profile defines which MCPs to load for a category of tasks
-# The router selects the appropriate profile based on task content
+# The LLM router uses the description to intelligently classify tasks
 
 profiles:
-  # Sales & CRM tasks
+  # Research & intelligence gathering
+  research:
+    name: "Research & Intelligence"
+    description: |
+      Web research, competitive analysis, market intelligence, finding information online.
+      Use when: searching the web, looking up companies, finding people on LinkedIn,
+      understanding competitors, exploring topics, getting current information,
+      answering "what is", "who is", "how does", "tell me about" questions,
+      or any task requiring external information from the internet.
+      Examples: "What does Vercel do?", "Find competitors to Notion",
+      "Research AI code assistants", "Look up John Smith on LinkedIn"
+    mcps:
+      - exa
+
+  # Sales & CRM
   crm:
     name: "CRM & Sales"
-    description: "Sales calls, contact management, deal tracking, follow-ups"
+    description: |
+      Sales activities, contact management, deal tracking, meeting notes, follow-ups.
+      Use when: logging a sales call, updating contact info, tracking deals,
+      recording meeting notes with prospects/clients, scheduling follow-ups,
+      managing the sales pipeline, or anything involving HubSpot CRM.
+      Examples: "Had coffee with Sarah from TechCorp", "Log meeting notes from demo call",
+      "Update deal stage for Acme Corp", "Schedule follow-up with prospect"
     mcps:
       - hubspot
       - google-calendar
       - slack
-    triggers:
-      keywords:
-        - "call with"
-        - "meeting with"
-        - "sales"
-        - "deal"
-        - "prospect"
-        - "lead"
-        - "follow up"
-        - "client"
-        - "customer"
-      patterns:
-        - ".*\\b(met|spoke|called|emailed)\\b.*\\b(with|to)\\b.*"
-        - ".*\\b(interested in|wants to|looking for)\\b.*"
-
-  # Research & learning
-  research:
-    name: "Research"
-    description: "Research topics, save findings, learn new things"
-    mcps:
-      - exa
-    triggers:
-      keywords:
-        - "research"
-        - "find out"
-        - "look up"
-        - "learn about"
-        - "what is"
-        - "how does"
-        - "summarize"
-        - "search"
-        - "exa"
-        - "who is"
-        - "tell me about"
-      patterns:
-        - ".*\\b(research|investigate|explore)\\b.*"
 
   # Personal task management
   personal:
-    name: "Personal"
-    description: "Personal tasks, reminders, life admin"
+    name: "Personal Tasks"
+    description: |
+      Personal reminders, to-do items, life admin, scheduling personal events.
+      Use when: creating reminders, managing personal to-do lists, scheduling
+      appointments, tracking personal tasks, life organization.
+      Examples: "Remind me to call mom", "Add groceries to my list",
+      "Schedule dentist appointment", "Don't forget to pick up dry cleaning"
     mcps:
       - todoist
       - google-calendar
-    triggers:
-      keywords:
-        - "remind me"
-        - "todo"
-        - "task"
-        - "need to"
-        - "don't forget"
-        - "pick up"
-        - "buy"
-        - "schedule"
-      patterns:
-        - ".*\\b(remind|remember|schedule|book)\\b.*"
 
   # Development & coding
   dev:
     name: "Development"
-    description: "Code tasks, bugs, features, PRs"
+    description: |
+      Software development tasks, code issues, pull requests, project management.
+      Use when: tracking bugs, managing features, creating/reviewing PRs,
+      deployment tasks, development project management, engineering work.
+      Examples: "Create issue for login bug", "What PRs need review?",
+      "Update ticket status", "Track progress on API feature"
     mcps:
       - github
       - linear
       - slack
-    triggers:
-      keywords:
-        - "bug"
-        - "feature"
-        - "PR"
-        - "pull request"
-        - "code"
-        - "deploy"
-        - "fix"
-        - "implement"
-        - "issue"
-      patterns:
-        - ".*\\b(bug|issue|PR|deploy|merge)\\b.*"
 
   # Notes & documentation
   notes:
-    name: "Notes"
-    description: "Long-form notes, documentation, ideas"
+    name: "Notes & Docs"
+    description: |
+      Long-form writing, documentation, idea capture, knowledge management.
+      Use when: writing documents, drafting content, capturing ideas,
+      creating documentation, organizing knowledge in Notion.
+      Examples: "Draft a project proposal", "Write up meeting notes",
+      "Document the onboarding process", "Capture this idea for later"
     mcps:
       - notion
-    triggers:
-      keywords:
-        - "note"
-        - "document"
-        - "write up"
-        - "idea"
-        - "draft"
-      patterns:
-        - ".*\\b(write|draft|document|note)\\b.*"
 
   # Communication
   comms:
     name: "Communication"
-    description: "Messages, updates, announcements"
+    description: |
+      Team messaging, email, announcements, notifications, sharing updates.
+      Use when: sending messages to team members, posting announcements,
+      notifying people, sharing updates, email communication.
+      Examples: "Tell the team we shipped the feature", "Post update in #general",
+      "Send email to client", "Notify Sarah about the meeting change"
     mcps:
       - slack
-      - gmail  # if available
-    triggers:
-      keywords:
-        - "message"
-        - "tell"
-        - "notify"
-        - "announce"
-        - "share"
-        - "post"
-      patterns:
-        - ".*\\b(tell|notify|message|post|share)\\b.*"
 
   # Fallback - general purpose
   general:
     name: "General"
-    description: "General tasks that don't fit a specific category"
+    description: |
+      Catch-all for tasks that don't clearly fit other categories.
+      Use when: the task is ambiguous, spans multiple domains, or doesn't
+      clearly match research/crm/personal/dev/notes/comms profiles.
+      This profile has access to multiple MCPs for flexibility.
     mcps:
       - todoist
       - google-calendar
       - slack
-      - notion
-    triggers:
-      # This is the fallback, matches anything
-      keywords: []
-      patterns: []
 
 # Default profile if router can't determine
 default_profile: general

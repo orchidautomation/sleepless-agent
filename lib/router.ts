@@ -61,32 +61,27 @@ function loadProfiles(): ProfilesConfig {
 function buildRoutingPrompt(profiles: ProfilesConfig): string {
   const profileDescriptions = Object.entries(profiles.profiles)
     .map(([id, profile]) => {
-      return `- **${id}**: ${profile.description} (MCPs: ${profile.mcps.join(", ")})`;
+      // Clean up multi-line descriptions for the prompt
+      const desc = profile.description.trim().replace(/\n/g, " ").replace(/\s+/g, " ");
+      return `**${id}** (MCPs: ${profile.mcps.join(", ")})\n${desc}`;
     })
-    .join("\n");
+    .join("\n\n");
 
   return `You are a task router. Classify the user's task into the most appropriate profile.
 
-Available profiles:
+AVAILABLE PROFILES:
+
 ${profileDescriptions}
 
-Respond with ONLY a JSON object (no markdown, no explanation):
-{
-  "profile": "profile_id",
-  "confidence": 0.0-1.0,
-  "reasoning": "brief explanation"
-}
+INSTRUCTIONS:
+- Read the task carefully
+- Match it to the profile whose description best fits
+- If the task needs web/internet information → research
+- If ambiguous or multi-domain → general
+- Respond with ONLY valid JSON, no markdown code blocks
 
-Rules:
-- Choose the profile whose MCPs are most relevant to the task
-- If the task involves web research, searching, or finding information → research
-- If the task involves CRM, sales, clients, meetings → crm
-- If the task involves personal reminders, todos, scheduling → personal
-- If the task involves code, bugs, PRs, development → dev
-- If the task involves notes, documentation, ideas → notes
-- If the task involves messaging, communication → comms
-- If unclear or general → general
-- confidence: 0.9+ for clear matches, 0.7-0.9 for likely matches, <0.7 for uncertain`;
+OUTPUT FORMAT:
+{"profile": "profile_id", "confidence": 0.95, "reasoning": "brief explanation"}`;
 }
 
 /**

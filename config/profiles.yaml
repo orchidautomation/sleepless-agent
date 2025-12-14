@@ -32,7 +32,6 @@ profiles:
     description: "Research topics, save findings, learn new things"
     mcps:
       - exa
-      - notion
     triggers:
       keywords:
         - "research"
@@ -42,6 +41,10 @@ profiles:
         - "what is"
         - "how does"
         - "summarize"
+        - "search"
+        - "exa"
+        - "who is"
+        - "tell me about"
       patterns:
         - ".*\\b(research|investigate|explore)\\b.*"
 

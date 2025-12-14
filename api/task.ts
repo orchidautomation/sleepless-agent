@@ -5,8 +5,8 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { put } from "@vercel/blob";
-import { routeTask } from "../lib/router";
-import { executeInSandbox } from "../lib/sandbox";
+import { routeTask } from "../lib/router.js";
+import { executeInSandbox } from "../lib/sandbox.js";
 
 interface TaskRequest {
   task: string;

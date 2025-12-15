@@ -70,59 +70,64 @@ async function executeTask(
   // Set initial status for Assistant Panel
   await updateAssistantStatus("is thinking...");
 
-  // Post initial "thinking" message with blocks
-  const thinkingMsg = await app.client.chat.postMessage({
-    channel,
-    thread_ts,
-    text: "Analyzing your request...",
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `${SPINNER[0]} *Analyzing your request...*`,
-        },
-      },
-    ],
-  });
+  // For non-assistant threads (channel @mentions), show spinner message
+  // For assistant threads, just use the native shimmer status bar
+  let thinkingMsg: { ts?: string } | null = null;
+  let spinnerInterval: NodeJS.Timeout | null = null;
 
-  // Start spinner animation (for non-assistant threads or as backup)
-  let spinnerIndex = 0;
-  let currentStatus = "Analyzing your request...";
-  const spinnerInterval = setInterval(async () => {
-    spinnerIndex = (spinnerIndex + 1) % SPINNER.length;
-    try {
-      await app.client.chat.update({
-        channel,
-        ts: thinkingMsg.ts!,
-        text: currentStatus,
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `${SPINNER[spinnerIndex]} *${currentStatus}*`,
-            },
+  if (!isAssistantThread) {
+    // Post initial "thinking" message with blocks
+    thinkingMsg = await app.client.chat.postMessage({
+      channel,
+      thread_ts,
+      text: "Analyzing your request...",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `${SPINNER[0]} *Analyzing your request...*`,
           },
-        ],
-      });
-    } catch {
-      // Ignore update errors
-    }
-  }, 500);
+        },
+      ],
+    });
+
+    // Start spinner animation for channel messages
+    let spinnerIndex = 0;
+    let currentStatus = "Analyzing your request...";
+    spinnerInterval = setInterval(async () => {
+      spinnerIndex = (spinnerIndex + 1) % SPINNER.length;
+      try {
+        await app.client.chat.update({
+          channel,
+          ts: thinkingMsg!.ts!,
+          text: currentStatus,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `${SPINNER[spinnerIndex]} *${currentStatus}*`,
+              },
+            },
+          ],
+        });
+      } catch {
+        // Ignore update errors
+      }
+    }, 500);
+  }
 
   try {
     // Route the task to get profile + MCPs
     console.log("  → Routing task...");
-    currentStatus = "Routing to the right tools...";
     await updateAssistantStatus("is analyzing the request...");
     const routing = await routeTask(task);
     console.log(`  → Routed to: ${routing.profile} (${routing.confidence * 100}% confidence)`);
     console.log(`  → MCPs: ${routing.mcps.join(", ")}`);
     console.log(`  → Reasoning: ${routing.reasoning}`);
 
-    // Update status
-    currentStatus = `Executing with ${routing.profile} profile...`;
+    // Update status for assistant threads
     await updateAssistantStatus(`is working with ${routing.profile} tools...`);
 
     // Execute in sandbox
@@ -136,24 +141,14 @@ async function executeTask(
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
     // Stop spinner and clear assistant status
-    clearInterval(spinnerInterval);
+    if (spinnerInterval) clearInterval(spinnerInterval);
     await updateAssistantStatus("");
 
     console.log(`  → Execution ${result.success ? "succeeded" : "failed"} in ${duration}s`);
 
-    // Post result with nice formatting
-    if (result.success) {
-      // Convert markdown to Slack format and truncate if needed
-      let output = markdownToSlack(result.output);
-      if (output.length > 2800) {
-        output = output.slice(0, 2800) + "\n\n_...truncated_";
-      }
-
-      await app.client.chat.update({
-        channel,
-        ts: thinkingMsg.ts!,
-        text: `Task completed in ${duration}s`,
-        blocks: [
+    // Build result blocks
+    const resultBlocks = result.success
+      ? [
           {
             type: "section",
             text: {
@@ -177,17 +172,17 @@ async function executeTask(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: output,
+              text: (() => {
+                let output = markdownToSlack(result.output);
+                if (output.length > 2800) {
+                  output = output.slice(0, 2800) + "\n\n_...truncated_";
+                }
+                return output;
+              })(),
             },
           },
-        ],
-      });
-    } else {
-      await app.client.chat.update({
-        channel,
-        ts: thinkingMsg.ts!,
-        text: "Task failed",
-        blocks: [
+        ]
+      : [
           {
             type: "section",
             text: {
@@ -195,27 +190,55 @@ async function executeTask(
               text: `❌ *Task failed*\n\n${result.error || "Unknown error"}`,
             },
           },
-        ],
+        ];
+
+    // Post result - update existing message for channels, new message for assistant threads
+    if (thinkingMsg?.ts) {
+      await app.client.chat.update({
+        channel,
+        ts: thinkingMsg.ts,
+        text: result.success ? `Task completed in ${duration}s` : "Task failed",
+        blocks: resultBlocks,
+      });
+    } else {
+      await app.client.chat.postMessage({
+        channel,
+        thread_ts,
+        text: result.success ? `Task completed in ${duration}s` : "Task failed",
+        blocks: resultBlocks,
+        unfurl_links: false,
       });
     }
   } catch (error) {
-    clearInterval(spinnerInterval);
+    if (spinnerInterval) clearInterval(spinnerInterval);
     await updateAssistantStatus("");
     console.error("  → Task execution error:", error);
-    await app.client.chat.update({
-      channel,
-      ts: thinkingMsg.ts!,
-      text: "Error executing task",
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `❌ *Error executing task*\n\n${error instanceof Error ? error.message : "Unknown error"}`,
-          },
+
+    const errorBlocks = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `❌ *Error executing task*\n\n${error instanceof Error ? error.message : "Unknown error"}`,
         },
-      ],
-    });
+      },
+    ];
+
+    if (thinkingMsg?.ts) {
+      await app.client.chat.update({
+        channel,
+        ts: thinkingMsg.ts,
+        text: "Error executing task",
+        blocks: errorBlocks,
+      });
+    } else {
+      await app.client.chat.postMessage({
+        channel,
+        thread_ts,
+        text: "Error executing task",
+        blocks: errorBlocks,
+      });
+    }
   }
 
   console.log(`  ═══════════════════════\n`);

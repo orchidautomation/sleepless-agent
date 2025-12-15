@@ -8,10 +8,32 @@
  * - Slash commands (future)
  */
 
-import { app } from "../../server/app.js";
-import { routeTask } from "../../lib/router.js";
-import { executeInSandbox } from "../../lib/sandbox.js";
 import crypto from "crypto";
+import { WebClient } from "@slack/web-api";
+
+// Initialize Slack client lazily
+let slackClient: WebClient | null = null;
+function getSlackClient(): WebClient {
+  if (!slackClient) {
+    slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+  }
+  return slackClient;
+}
+
+// Lazy imports for heavy modules
+let routeTask: typeof import("../../lib/router.js").routeTask;
+let executeInSandbox: typeof import("../../lib/sandbox.js").executeInSandbox;
+
+async function loadModules() {
+  if (!routeTask) {
+    const router = await import("../../lib/router.js");
+    routeTask = router.routeTask;
+  }
+  if (!executeInSandbox) {
+    const sandbox = await import("../../lib/sandbox.js");
+    executeInSandbox = sandbox.executeInSandbox;
+  }
+}
 
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET!;
 
@@ -70,10 +92,14 @@ async function executeTask(
 ): Promise<void> {
   console.log(`[Events] Executing task: "${task.slice(0, 50)}..."`);
 
+  // Load heavy modules
+  await loadModules();
+  const client = getSlackClient();
+
   const updateAssistantStatus = async (status: string) => {
     if (isAssistantThread) {
       try {
-        await app.client.assistant.threads.setStatus({
+        await client.assistant.threads.setStatus({
           channel_id: channel,
           thread_ts,
           status,
@@ -89,7 +115,7 @@ async function executeTask(
   // For channels, post a thinking message
   let thinkingMsg: { ts?: string } | null = null;
   if (!isAssistantThread) {
-    thinkingMsg = await app.client.chat.postMessage({
+    thinkingMsg = await client.chat.postMessage({
       channel,
       thread_ts,
       text: "Analyzing your request...",
@@ -133,14 +159,14 @@ async function executeTask(
         ];
 
     if (thinkingMsg?.ts) {
-      await app.client.chat.update({
+      await client.chat.update({
         channel,
         ts: thinkingMsg.ts,
         text: result.success ? `Task completed in ${duration}s` : "Task failed",
         blocks: resultBlocks,
       });
     } else {
-      await app.client.chat.postMessage({
+      await client.chat.postMessage({
         channel,
         thread_ts,
         text: result.success ? `Task completed in ${duration}s` : "Task failed",
@@ -153,14 +179,14 @@ async function executeTask(
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
 
     if (thinkingMsg?.ts) {
-      await app.client.chat.update({
+      await client.chat.update({
         channel,
         ts: thinkingMsg.ts,
         text: "Error",
         blocks: [{ type: "section", text: { type: "mrkdwn", text: `❌ *Error*\n\n${errorMsg}` } }],
       });
     } else {
-      await app.client.chat.postMessage({
+      await client.chat.postMessage({
         channel,
         thread_ts,
         text: `Error: ${errorMsg}`,
@@ -209,6 +235,8 @@ export async function POST(req: Request): Promise<Response> {
     const event = body.event;
     console.log(`[Events] Event type: ${event.type}`);
 
+    const client = getSlackClient();
+
     // Handle app_mention
     if (event.type === "app_mention") {
       const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
@@ -218,7 +246,7 @@ export async function POST(req: Request): Promise<Response> {
       if (text) {
         executeTask(text, channel, thread_ts, false).catch(console.error);
       } else {
-        app.client.chat.postMessage({
+        client.chat.postMessage({
           channel,
           thread_ts,
           text: "👋 Hi! I'm Personal OS. Tell me what you'd like help with!",
@@ -232,13 +260,13 @@ export async function POST(req: Request): Promise<Response> {
       const thread_ts = event.assistant_thread?.thread_ts;
 
       if (channel && thread_ts) {
-        app.client.chat.postMessage({
+        client.chat.postMessage({
           channel,
           thread_ts,
           text: "👋 Hi! I'm Personal OS, your AI assistant.",
         }).catch(console.error);
 
-        app.client.assistant.threads.setSuggestedPrompts({
+        client.assistant.threads.setSuggestedPrompts({
           channel_id: channel,
           thread_ts,
           prompts: [

@@ -1,0 +1,60 @@
+{
+  "_metadata": {
+    "major_version": 2,
+    "minor_version": 1
+  },
+  "display_information": {
+    "name": "Personal OS",
+    "description": "Your AI-powered personal operating system",
+    "background_color": "#1a1a2e",
+    "long_description": "Personal OS is your AI assistant that helps with tasks, research, CRM management, and more. It routes tasks to specialized profiles and executes them using Claude AI with relevant tools."
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "Personal OS",
+      "always_online": true
+    },
+    "assistant_view": {
+      "assistant_description": "Your personal AI assistant for tasks, research, CRM, and more. Try: 'Research company X' or 'Add contact to CRM'."
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "assistant:write",
+        "channels:history",
+        "chat:write",
+        "groups:history",
+        "im:history",
+        "im:read",
+        "im:write",
+        "mpim:history"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://unsimilar-leverlike-ayaan.ngrok-free.dev/api/slack/events",
+      "bot_events": [
+        "app_home_opened",
+        "app_mention",
+        "assistant_thread_started",
+        "assistant_thread_context_changed",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://unsimilar-leverlike-ayaan.ngrok-free.dev/api/slack/events"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

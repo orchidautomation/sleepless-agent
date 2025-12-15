@@ -1,4 +1,7 @@
 {
+  "buildCommand": "npm run build",
+  "installCommand": "npm install --legacy-peer-deps",
+  "framework": null,
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 300

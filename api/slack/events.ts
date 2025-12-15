@@ -10,6 +10,7 @@
 
 import crypto from "crypto";
 import { WebClient } from "@slack/web-api";
+import { waitUntil } from "@vercel/functions";
 
 // Initialize Slack client lazily
 let slackClient: WebClient | null = null;
@@ -275,13 +276,14 @@ export async function POST(req: Request): Promise<Response> {
       const thread_ts = event.thread_ts || event.ts;
 
       if (text) {
-        executeTask(text, channel, thread_ts, false).catch(console.error);
+        // Use waitUntil to keep function alive during async processing
+        waitUntil(executeTask(text, channel, thread_ts, false));
       } else {
-        client.chat.postMessage({
+        waitUntil(client.chat.postMessage({
           channel,
           thread_ts,
           text: "👋 Hi! I'm Personal OS. Tell me what you'd like help with!",
-        }).catch(console.error);
+        }));
       }
     }
 
@@ -291,20 +293,20 @@ export async function POST(req: Request): Promise<Response> {
       const thread_ts = event.assistant_thread?.thread_ts;
 
       if (channel && thread_ts) {
-        client.chat.postMessage({
+        waitUntil(client.chat.postMessage({
           channel,
           thread_ts,
           text: "👋 Hi! I'm Personal OS, your AI assistant.",
-        }).catch(console.error);
+        }));
 
-        client.assistant.threads.setSuggestedPrompts({
+        waitUntil(client.assistant.threads.setSuggestedPrompts({
           channel_id: channel,
           thread_ts,
           prompts: [
             { title: "Research a company", message: "Research Stripe and tell me about their products" },
             { title: "Web search", message: "What are the latest AI news today?" },
           ],
-        }).catch(console.error);
+        }));
       }
     }
 
@@ -315,7 +317,8 @@ export async function POST(req: Request): Promise<Response> {
       const thread_ts = event.thread_ts || event.ts;
 
       if (text) {
-        executeTask(text, channel, thread_ts, true).catch(console.error);
+        // Use waitUntil to keep function alive during async processing
+        waitUntil(executeTask(text, channel, thread_ts, true));
       }
     }
   }

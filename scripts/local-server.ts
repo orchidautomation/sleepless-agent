@@ -25,16 +25,20 @@ function markdownToSlack(text: string): string {
     .replace(/^###\s+(.+)$/gm, "*$1*")
     .replace(/^##\s+(.+)$/gm, "*$1*")
     .replace(/^#\s+(.+)$/gm, "*$1*")
-    // Bold: **text** → *text*
-    .replace(/\*\*([^*]+)\*\*/g, "*$1*")
-    // Italic: _text_ stays same
-    // Code blocks: ```code``` → ```code```
-    // Inline code: `code` stays same
+    // Bold: **text** → *text* (handle multi-line and nested)
+    .replace(/\*\*([^*]+?)\*\*/g, "*$1*")
+    // Also handle ***bold italic*** → *_text_*
+    .replace(/\*\*\*([^*]+?)\*\*\*/g, "*_$1_*")
+    // Italic with underscores: __text__ → _text_
+    .replace(/__([^_]+?)__/g, "_$1_")
     // Links: [text](url) → <url|text>
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
-    // Bullet points: - item stays same
+    // Horizontal rules: --- or *** → ───
+    .replace(/^[-*]{3,}$/gm, "───────────────────")
     // Clean up extra newlines
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(/\n{3,}/g, "\n\n")
+    // Ensure no double asterisks remain
+    .replace(/\*\*+/g, "*");
 }
 
 /**
@@ -168,19 +172,47 @@ async function executeTask(
           {
             type: "divider",
           },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: (() => {
-                let output = markdownToSlack(result.output);
-                if (output.length > 2800) {
-                  output = output.slice(0, 2800) + "\n\n_...truncated_";
+          // Split long content into multiple blocks (max 3000 chars each)
+          ...(() => {
+            const output = markdownToSlack(result.output);
+            const blocks: Array<{ type: string; text: { type: string; text: string } }> = [];
+            const maxLen = 2900; // Leave some buffer under 3000
+
+            if (output.length <= maxLen) {
+              blocks.push({
+                type: "section",
+                text: { type: "mrkdwn", text: output },
+              });
+            } else {
+              // Split by paragraphs first, then by length
+              let remaining = output;
+              while (remaining.length > 0) {
+                let chunk: string;
+                if (remaining.length <= maxLen) {
+                  chunk = remaining;
+                  remaining = "";
+                } else {
+                  // Try to break at a paragraph
+                  let breakPoint = remaining.lastIndexOf("\n\n", maxLen);
+                  if (breakPoint < maxLen / 2) {
+                    // No good paragraph break, try newline
+                    breakPoint = remaining.lastIndexOf("\n", maxLen);
+                  }
+                  if (breakPoint < maxLen / 2) {
+                    // No good break point, just cut
+                    breakPoint = maxLen;
+                  }
+                  chunk = remaining.slice(0, breakPoint);
+                  remaining = remaining.slice(breakPoint).trimStart();
                 }
-                return output;
-              })(),
-            },
-          },
+                blocks.push({
+                  type: "section",
+                  text: { type: "mrkdwn", text: chunk },
+                });
+              }
+            }
+            return blocks;
+          })(),
         ]
       : [
           {

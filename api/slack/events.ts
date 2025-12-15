@@ -177,7 +177,7 @@ async function executeTask(
         ? [
             // Simple: Just show the response, minimal chrome
             { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
-            { type: "context", elements: [{ type: "mrkdwn", text: `⚡ _${duration}s_` }] },
+            { type: "context", elements: [{ type: "mrkdwn", text: `_${duration}s_` }] },
           ]
         : [
             // Complex: Show full metadata
@@ -282,23 +282,17 @@ export async function POST(req: Request): Promise<Response> {
         waitUntil(client.chat.postMessage({
           channel,
           thread_ts,
-          text: "👋 Hi! I'm Personal OS. Tell me what you'd like help with!",
+          text: "What can I help you with?",
         }));
       }
     }
 
-    // Handle assistant_thread_started
+    // Handle assistant_thread_started - just set suggested prompts, no greeting
     if (event.type === "assistant_thread_started") {
       const channel = event.assistant_thread?.channel_id;
       const thread_ts = event.assistant_thread?.thread_ts;
 
       if (channel && thread_ts) {
-        waitUntil(client.chat.postMessage({
-          channel,
-          thread_ts,
-          text: "👋 Hi! I'm Personal OS, your AI assistant.",
-        }));
-
         waitUntil(client.assistant.threads.setSuggestedPrompts({
           channel_id: channel,
           thread_ts,

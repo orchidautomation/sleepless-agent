@@ -26,6 +26,7 @@ interface RoutingResult {
   mcps: string[];
   confidence: number;
   reasoning: string;
+  complexity: "simple" | "complex";
 }
 
 // Cache for loaded profiles
@@ -67,7 +68,7 @@ function buildRoutingPrompt(profiles: ProfilesConfig): string {
     })
     .join("\n\n");
 
-  return `You are a task router. Classify the user's task into the most appropriate profile.
+  return `You are a task router. Classify the user's task into the most appropriate profile AND complexity level.
 
 AVAILABLE PROFILES:
 
@@ -82,10 +83,23 @@ ROUTING RULES (follow strictly):
 6. If the task involves MESSAGING, SLACK, EMAIL, COMMUNICATION → "comms"
 7. ONLY use "general" if NONE of the above apply
 
-DEFAULT BIAS: Prefer "research" for any information-seeking task. Most questions need web search.
+COMPLEXITY RULES:
+- "simple": Quick questions, greetings, simple web searches, calculations, conversions, time/weather, basic Q&A that needs only ONE quick lookup
+- "complex": Research tasks, multi-step analysis, CRM operations, anything needing multiple tool calls or deep investigation
+
+Examples:
+- "hi" / "hello" / "hey" → simple + general
+- "what time is it in Tokyo?" → simple + general
+- "what's 25 * 47?" → simple + general
+- "who is the CEO of Stripe?" → simple + research (single search)
+- "research Stripe's competitors and pricing" → complex + research
+- "add John to CRM" → complex + crm
+- "summarize the latest AI news" → complex + research
+
+DEFAULT: When in doubt about complexity, choose "complex" to be safe.
 
 Respond with ONLY valid JSON (no markdown):
-{"profile": "profile_id", "confidence": 0.95, "reasoning": "brief reason"}`;
+{"profile": "profile_id", "confidence": 0.95, "reasoning": "brief reason", "complexity": "simple"}`;
 }
 
 /**
@@ -129,6 +143,7 @@ async function routeWithLLM(
       profile: string;
       confidence: number;
       reasoning: string;
+      complexity?: "simple" | "complex";
     };
 
     // Validate profile exists
@@ -140,15 +155,21 @@ async function routeWithLLM(
         mcps: defaultProfile.mcps,
         confidence: 0.5,
         reasoning: `Unknown profile returned, fallback to default`,
+        complexity: "complex", // Default to complex for safety
       };
     }
 
     const profile = profiles.profiles[result.profile];
+    const complexity = result.complexity === "simple" ? "simple" : "complex";
+
+    console.log(`[Router] Complexity: ${complexity}`);
+
     return {
       profile: result.profile,
       mcps: profile.mcps,
       confidence: result.confidence,
       reasoning: result.reasoning,
+      complexity,
     };
   } catch (error) {
     console.error("[Router] LLM routing failed:", error);
@@ -159,6 +180,7 @@ async function routeWithLLM(
       mcps: defaultProfile.mcps,
       confidence: 0.3,
       reasoning: `LLM routing failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      complexity: "complex", // Default to complex for safety
     };
   }
 }

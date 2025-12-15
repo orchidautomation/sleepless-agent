@@ -23,6 +23,7 @@ function getSlackClient(): WebClient {
 // Lazy imports for heavy modules
 let routeTask: typeof import("../../lib/router.js").routeTask;
 let executeInSandbox: typeof import("../../lib/sandbox.js").executeInSandbox;
+let executeDirectly: typeof import("../../lib/direct-executor.js").executeDirectly;
 
 async function loadModules() {
   if (!routeTask) {
@@ -32,6 +33,10 @@ async function loadModules() {
   if (!executeInSandbox) {
     const sandbox = await import("../../lib/sandbox.js");
     executeInSandbox = sandbox.executeInSandbox;
+  }
+  if (!executeDirectly) {
+    const direct = await import("../../lib/direct-executor.js");
+    executeDirectly = direct.executeDirectly;
   }
 }
 
@@ -139,29 +144,47 @@ async function executeTask(
   try {
     await updateAssistantStatus("is analyzing the request...");
     const routing = await routeTask(task);
-    console.log(`[Events] Routed to: ${routing.profile}`);
+    console.log(`[Events] Routed to: ${routing.profile} (${routing.complexity})`);
 
-    await updateAssistantStatus(`is working with ${routing.profile} tools...`);
-
+    let result: { output: string; success: boolean; error?: string };
+    let duration: string;
     const startTime = Date.now();
-    const result = await executeInSandbox({
-      task,
-      mcps: routing.mcps,
-      timeout: "5m",
-    });
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // HYBRID ROUTING: Use direct execution for simple tasks, sandbox for complex
+    if (routing.complexity === "simple") {
+      console.log(`[Events] Using FAST direct execution`);
+      await updateAssistantStatus("is responding...");
+      result = await executeDirectly(task);
+      duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    } else {
+      console.log(`[Events] Using FULL sandbox execution`);
+      await updateAssistantStatus(`is working with ${routing.profile} tools...`);
+      result = await executeInSandbox({
+        task,
+        mcps: routing.mcps,
+        timeout: "5m",
+      });
+      duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    }
 
     await updateAssistantStatus("");
 
-    // Build result blocks
+    // Build result blocks - different format for simple vs complex
     const output = markdownToSlack(result.output);
     const resultBlocks = result.success
-      ? [
-          { type: "section", text: { type: "mrkdwn", text: `✅ *Task completed* _${duration}s_` } },
-          { type: "context", elements: [{ type: "mrkdwn", text: `🎯 ${routing.profile} • 📦 ${routing.mcps.join(", ")}` }] },
-          { type: "divider" },
-          { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
-        ]
+      ? routing.complexity === "simple"
+        ? [
+            // Simple: Just show the response, minimal chrome
+            { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
+            { type: "context", elements: [{ type: "mrkdwn", text: `⚡ _${duration}s_` }] },
+          ]
+        : [
+            // Complex: Show full metadata
+            { type: "section", text: { type: "mrkdwn", text: `✅ *Task completed* _${duration}s_` } },
+            { type: "context", elements: [{ type: "mrkdwn", text: `🎯 ${routing.profile} • 📦 ${routing.mcps.join(", ")}` }] },
+            { type: "divider" },
+            { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
+          ]
       : [
           { type: "section", text: { type: "mrkdwn", text: `❌ *Task failed*\n\n${result.error || "Unknown error"}` } },
         ];

@@ -8,8 +8,218 @@ import { createServer, IncomingMessage, ServerResponse } from "http";
 import crypto from "crypto";
 import { app } from "../server/app.js";
 import { env } from "../server/env.js";
+import { routeTask } from "../lib/router.js";
+import { executeInSandbox } from "../lib/sandbox.js";
 
 const PORT = 3000;
+
+// Spinner frames for animation
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/**
+ * Convert markdown to Slack mrkdwn format
+ */
+function markdownToSlack(text: string): string {
+  return text
+    // Headers: ## Header → *Header*
+    .replace(/^###\s+(.+)$/gm, "*$1*")
+    .replace(/^##\s+(.+)$/gm, "*$1*")
+    .replace(/^#\s+(.+)$/gm, "*$1*")
+    // Bold: **text** → *text*
+    .replace(/\*\*([^*]+)\*\*/g, "*$1*")
+    // Italic: _text_ stays same
+    // Code blocks: ```code``` → ```code```
+    // Inline code: `code` stays same
+    // Links: [text](url) → <url|text>
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
+    // Bullet points: - item stays same
+    // Clean up extra newlines
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * Execute a task and post results to Slack
+ */
+async function executeTask(
+  task: string,
+  channel: string,
+  thread_ts: string,
+  userId: string,
+  isAssistantThread: boolean = false
+): Promise<void> {
+  console.log(`\n  ═══ TASK EXECUTION ═══`);
+  console.log(`  Task: "${task}"`);
+  console.log(`  Assistant Thread: ${isAssistantThread}`);
+
+  // For Assistant Panel: use setStatus for shimmer effect
+  // For channels: use message updates with spinner
+  const updateAssistantStatus = async (status: string) => {
+    if (isAssistantThread) {
+      try {
+        await app.client.assistant.threads.setStatus({
+          channel_id: channel,
+          thread_ts,
+          status: status,
+        });
+      } catch {
+        // Ignore status update errors
+      }
+    }
+  };
+
+  // Set initial status for Assistant Panel
+  await updateAssistantStatus("is thinking...");
+
+  // Post initial "thinking" message with blocks
+  const thinkingMsg = await app.client.chat.postMessage({
+    channel,
+    thread_ts,
+    text: "Analyzing your request...",
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${SPINNER[0]} *Analyzing your request...*`,
+        },
+      },
+    ],
+  });
+
+  // Start spinner animation (for non-assistant threads or as backup)
+  let spinnerIndex = 0;
+  let currentStatus = "Analyzing your request...";
+  const spinnerInterval = setInterval(async () => {
+    spinnerIndex = (spinnerIndex + 1) % SPINNER.length;
+    try {
+      await app.client.chat.update({
+        channel,
+        ts: thinkingMsg.ts!,
+        text: currentStatus,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `${SPINNER[spinnerIndex]} *${currentStatus}*`,
+            },
+          },
+        ],
+      });
+    } catch {
+      // Ignore update errors
+    }
+  }, 500);
+
+  try {
+    // Route the task to get profile + MCPs
+    console.log("  → Routing task...");
+    currentStatus = "Routing to the right tools...";
+    await updateAssistantStatus("is analyzing the request...");
+    const routing = await routeTask(task);
+    console.log(`  → Routed to: ${routing.profile} (${routing.confidence * 100}% confidence)`);
+    console.log(`  → MCPs: ${routing.mcps.join(", ")}`);
+    console.log(`  → Reasoning: ${routing.reasoning}`);
+
+    // Update status
+    currentStatus = `Executing with ${routing.profile} profile...`;
+    await updateAssistantStatus(`is working with ${routing.profile} tools...`);
+
+    // Execute in sandbox
+    console.log("  → Executing in sandbox...");
+    const startTime = Date.now();
+    const result = await executeInSandbox({
+      task,
+      mcps: routing.mcps,
+      timeout: "5m",
+    });
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Stop spinner and clear assistant status
+    clearInterval(spinnerInterval);
+    await updateAssistantStatus("");
+
+    console.log(`  → Execution ${result.success ? "succeeded" : "failed"} in ${duration}s`);
+
+    // Post result with nice formatting
+    if (result.success) {
+      // Convert markdown to Slack format and truncate if needed
+      let output = markdownToSlack(result.output);
+      if (output.length > 2800) {
+        output = output.slice(0, 2800) + "\n\n_...truncated_";
+      }
+
+      await app.client.chat.update({
+        channel,
+        ts: thinkingMsg.ts!,
+        text: `Task completed in ${duration}s`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `✅ *Task completed* _${duration}s_`,
+            },
+          },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `🎯 ${routing.profile} • 📦 ${routing.mcps.join(", ")}`,
+              },
+            ],
+          },
+          {
+            type: "divider",
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: output,
+            },
+          },
+        ],
+      });
+    } else {
+      await app.client.chat.update({
+        channel,
+        ts: thinkingMsg.ts!,
+        text: "Task failed",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `❌ *Task failed*\n\n${result.error || "Unknown error"}`,
+            },
+          },
+        ],
+      });
+    }
+  } catch (error) {
+    clearInterval(spinnerInterval);
+    await updateAssistantStatus("");
+    console.error("  → Task execution error:", error);
+    await app.client.chat.update({
+      channel,
+      ts: thinkingMsg.ts!,
+      text: "Error executing task",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `❌ *Error executing task*\n\n${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        },
+      ],
+    });
+  }
+
+  console.log(`  ═══════════════════════\n`);
+}
 
 // Parse request body
 async function parseBody(req: IncomingMessage): Promise<string> {
@@ -94,15 +304,18 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
           console.log(`  → @mention from ${userId}: "${text}"`);
 
-          try {
+          if (text) {
+            // Execute the task
+            executeTask(text, channel, thread_ts, userId).catch((err) => {
+              console.error("  → Task execution failed:", err);
+            });
+          } else {
+            // No task provided, send help message
             await app.client.chat.postMessage({
               channel,
               thread_ts,
-              text: `Hello <@${userId}>! I received your message: "${text}"\n\nThis is Personal OS - your AI assistant. Task execution coming soon!`,
+              text: "👋 Hi! I'm Personal OS. Tell me what you'd like help with!\n\nExamples:\n• Research company X\n• Add contact to CRM\n• Schedule a meeting",
             });
-            console.log("  → Response sent!");
-          } catch (err) {
-            console.error("  → Failed to send response:", err);
           }
         }
 
@@ -115,12 +328,34 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
           if (channel && thread_ts) {
             try {
+              // Send welcome message
               await app.client.chat.postMessage({
                 channel,
                 thread_ts,
                 text: "👋 Hi! I'm Personal OS, your AI assistant.\n\nI can help with:\n• Research tasks\n• CRM management\n• General questions\n\nWhat would you like help with?",
               });
               console.log("  → Welcome message sent!");
+
+              // Set suggested prompts for quick actions
+              await app.client.assistant.threads.setSuggestedPrompts({
+                channel_id: channel,
+                thread_ts,
+                prompts: [
+                  {
+                    title: "Research a company",
+                    message: "Research Stripe and tell me about their products",
+                  },
+                  {
+                    title: "Add to CRM",
+                    message: "Add John Smith from Acme Corp to my CRM",
+                  },
+                  {
+                    title: "Web search",
+                    message: "What are the latest AI news today?",
+                  },
+                ],
+              });
+              console.log("  → Suggested prompts set!");
             } catch (err) {
               console.error("  → Failed to send welcome:", err);
             }
@@ -136,15 +371,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
           console.log(`  → DM from ${userId}: "${text}"`);
 
-          try {
-            await app.client.chat.postMessage({
-              channel,
-              thread_ts,
-              text: `I received: "${text}"\n\nTask execution coming soon!`,
+          if (text) {
+            // Execute the task (isAssistantThread = true for shimmer effect)
+            executeTask(text, channel, thread_ts, userId, true).catch((err) => {
+              console.error("  → Task execution failed:", err);
             });
-            console.log("  → Response sent!");
-          } catch (err) {
-            console.error("  → Failed to send response:", err);
           }
         }
       }

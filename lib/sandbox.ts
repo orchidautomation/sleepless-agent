@@ -203,9 +203,22 @@ export async function executeInSandbox(
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { writeFileSync } from 'fs';
 
-const task = ${JSON.stringify(config.task)};
+const userTask = ${JSON.stringify(config.task)};
 const mcpServers = ${JSON.stringify(mcpServers)};
 const hasMcps = ${hasMcps};
+
+// Format task with Slack mrkdwn instructions
+const task = \`You are a helpful assistant responding in Slack. Format your response using Slack mrkdwn:
+- Use *bold* for emphasis (single asterisks, NOT double)
+- Use _italic_ for subtle emphasis
+- Use \\\`code\\\` for inline code
+- Use \\\`\\\`\\\`code blocks\\\`\\\`\\\` for multi-line code
+- Use • for bullet points
+- Use > for blockquotes
+- Keep responses concise and well-structured
+- Do NOT use **double asterisks** or markdown headers like ## - Slack doesn't support them
+
+Task: \${userTask}\`;
 
 function writeResult(result) {
   writeFileSync('/vercel/sandbox/result.json', JSON.stringify(result));

@@ -35,8 +35,6 @@ async function loadModules() {
   }
 }
 
-const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET!;
-
 // Spinner frames for animation
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -67,18 +65,28 @@ function verifySlackRequest(
 ): boolean {
   if (!signature || !timestamp) return false;
 
+  const signingSecret = process.env.SLACK_SIGNING_SECRET;
+  if (!signingSecret) {
+    console.error("[Events] Missing SLACK_SIGNING_SECRET");
+    return false;
+  }
+
   const sigBasestring = `v0:${timestamp}:${body}`;
   const mySignature =
     "v0=" +
     crypto
-      .createHmac("sha256", SLACK_SIGNING_SECRET)
+      .createHmac("sha256", signingSecret)
       .update(sigBasestring)
       .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(mySignature),
-    Buffer.from(signature)
-  );
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(mySignature),
+      Buffer.from(signature)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**

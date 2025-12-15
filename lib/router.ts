@@ -84,19 +84,23 @@ ROUTING RULES (follow strictly):
 7. ONLY use "general" if NONE of the above apply
 
 COMPLEXITY RULES:
-- "simple": Quick questions, greetings, simple web searches, calculations, conversions, time/weather, basic Q&A that needs only ONE quick lookup
-- "complex": Research tasks, multi-step analysis, CRM operations, anything needing multiple tool calls or deep investigation
+- "simple": ONLY for greetings, math, time/timezone, unit conversions, or single factual questions
+- "complex": ANY task with the word "research", ANY URL/domain, ANY company lookup, summarization, multi-step tasks
+
+CRITICAL: If the message contains "research" OR a URL/domain (like example.com) → ALWAYS "complex"
 
 Examples:
 - "hi" / "hello" / "hey" → simple + general
 - "what time is it in Tokyo?" → simple + general
 - "what's 25 * 47?" → simple + general
-- "who is the CEO of Stripe?" → simple + research (single search)
-- "research Stripe's competitors and pricing" → complex + research
+- "who is the CEO of Stripe?" → simple + research
+- "research tryprofound.com" → complex + research (HAS "research" AND domain)
+- "research Stripe" → complex + research (HAS "research")
+- "tell me about example.com" → complex + research (HAS domain)
 - "add John to CRM" → complex + crm
 - "summarize the latest AI news" → complex + research
 
-DEFAULT: When in doubt about complexity, choose "complex" to be safe.
+DEFAULT: When in doubt, choose "complex".
 
 Respond with ONLY valid JSON (no markdown):
 {"profile": "profile_id", "confidence": 0.95, "reasoning": "brief reason", "complexity": "simple"}`;

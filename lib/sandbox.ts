@@ -30,6 +30,10 @@ interface McpConfig {
   url?: string;
   command?: string;
   env?: Record<string, string>;
+  auth?: {
+    type: "bearer";
+    token: string;
+  };
   description?: string;
 }
 
@@ -81,10 +85,26 @@ function buildMcpServersConfig(mcpIds: string[]): Record<string, object> {
         }
       }
 
+      // Build headers, including auth if configured
+      const headers: Record<string, string> = {};
+      if (mcp.auth?.type === "bearer" && mcp.auth.token) {
+        let token = mcp.auth.token;
+        // Substitute env vars in token
+        const tokenEnvMatches = token.match(/\$\{([^}]+)\}/g);
+        if (tokenEnvMatches) {
+          for (const match of tokenEnvMatches) {
+            const envVar = match.slice(2, -1);
+            const value = process.env[envVar] || "";
+            token = token.replace(match, value);
+          }
+        }
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       mcpServers[mcpId] = {
         type: "http",
         url,
-        headers: {},
+        headers,
       };
     } else if (mcp.type === "npx" && mcp.command) {
       // NPX-based MCPs

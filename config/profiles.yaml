@@ -1,5 +1,5 @@
 # MCP Profiles
-# Each profile defines which MCPs to load for a category of tasks
+# All profiles use Rube MCP which provides access to 500+ apps
 # The LLM router uses the description to intelligently classify tasks
 
 profiles:
@@ -15,7 +15,7 @@ profiles:
       Examples: "What does Vercel do?", "Find competitors to Notion",
       "Research AI code assistants", "Look up John Smith on LinkedIn"
     mcps:
-      - exa
+      - rube
 
   # Sales & CRM
   crm:
@@ -24,13 +24,11 @@ profiles:
       Sales activities, contact management, deal tracking, meeting notes, follow-ups.
       Use when: logging a sales call, updating contact info, tracking deals,
       recording meeting notes with prospects/clients, scheduling follow-ups,
-      managing the sales pipeline, or anything involving HubSpot CRM.
+      managing the sales pipeline, or anything involving HubSpot or Attio CRM.
       Examples: "Had coffee with Sarah from TechCorp", "Log meeting notes from demo call",
       "Update deal stage for Acme Corp", "Schedule follow-up with prospect"
     mcps:
-      - hubspot
-      - google-calendar
-      - slack
+      - rube
 
   # Personal task management
   personal:
@@ -42,8 +40,7 @@ profiles:
       Examples: "Remind me to call mom", "Add groceries to my list",
       "Schedule dentist appointment", "Don't forget to pick up dry cleaning"
     mcps:
-      - todoist
-      - google-calendar
+      - rube
 
   # Development & coding
   dev:
@@ -55,9 +52,7 @@ profiles:
       Examples: "Create issue for login bug", "What PRs need review?",
       "Update ticket status", "Track progress on API feature"
     mcps:
-      - github
-      - linear
-      - slack
+      - rube
 
   # Notes & documentation
   notes:
@@ -69,7 +64,7 @@ profiles:
       Examples: "Draft a project proposal", "Write up meeting notes",
       "Document the onboarding process", "Capture this idea for later"
     mcps:
-      - notion
+      - rube
 
   # Communication
   comms:
@@ -81,7 +76,7 @@ profiles:
       Examples: "Tell the team we shipped the feature", "Post update in #general",
       "Send email to client", "Notify Sarah about the meeting change"
     mcps:
-      - slack
+      - rube
 
   # Fallback - general purpose
   general:
@@ -90,14 +85,12 @@ profiles:
       Catch-all for tasks that don't clearly fit other categories.
       Use when: the task is ambiguous, spans multiple domains, or doesn't
       clearly match research/crm/personal/dev/notes/comms profiles.
-      This profile has access to multiple MCPs for flexibility.
+      This profile has access to all 500+ apps via Rube.
     mcps:
-      - todoist
-      - google-calendar
-      - slack
+      - rube
 
 # Default profile if router can't determine
 default_profile: general
 
-# Maximum MCPs to load (to prevent overload)
-max_mcps: 5
+# Maximum MCPs to load (Rube is just 1 but provides 500+ tools)
+max_mcps: 1

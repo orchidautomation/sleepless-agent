@@ -1,89 +1,26 @@
 # MCP Configurations
-# Connection details for each MCP server
+# Single Rube MCP replaces all individual app MCPs
 
 mcps:
-  hubspot:
-    name: "HubSpot"
-    type: "npx"
-    command: "@hubspot/mcp-server"
-    env:
-      HUBSPOT_ACCESS_TOKEN: "${HUBSPOT_ACCESS_TOKEN}"
-    description: "CRM - contacts, deals, notes, tasks"
-
-  google-calendar:
-    name: "Google Calendar"
-    type: "npx"
-    command: "@anthropic/mcp-google-calendar"
-    env:
-      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID}"
-      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET}"
-      GOOGLE_REFRESH_TOKEN: "${GOOGLE_REFRESH_TOKEN}"
-    description: "Calendar management"
-
-  slack:
-    name: "Slack"
-    type: "npx"
-    command: "@anthropic/mcp-slack"
-    env:
-      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN}"
-    description: "Team messaging"
-
-  notion:
-    name: "Notion"
+  rube:
+    name: "Rube"
     type: "http"
-    url: "https://mcp.notion.com/mcp"
-    description: "Notes, pages, databases (uses OAuth - no API key needed in config)"
-
-  todoist:
-    name: "Todoist"
-    type: "npx"
-    command: "@anthropic/mcp-todoist"
-    env:
-      TODOIST_API_TOKEN: "${TODOIST_API_TOKEN}"
-    description: "Personal task management"
-
-  github:
-    name: "GitHub"
-    type: "npx"
-    command: "@anthropic/mcp-github"
-    env:
-      GITHUB_TOKEN: "${GITHUB_TOKEN}"
-    description: "Code repositories, issues, PRs"
-
-  linear:
-    name: "Linear"
-    type: "npx"
-    command: "@anthropic/mcp-linear"
-    env:
-      LINEAR_API_KEY: "${LINEAR_API_KEY}"
-    description: "Issue tracking for work"
-
-  exa:
-    name: "Exa"
-    type: "http"
-    url: "https://mcp.exa.ai/mcp?exaApiKey=${EXA_API_KEY}&tools=web_search_exa,get_code_context_exa,crawling_exa,company_research_exa,linkedin_search_exa,deep_researcher_start,deep_researcher_check"
-    description: "AI-powered web search, company research, LinkedIn search, code context, deep research"
-    tools:
-      - web_search_exa
-      - get_code_context_exa
-      - crawling_exa
-      - company_research_exa
-      - linkedin_search_exa
-      - deep_researcher_start
-      - deep_researcher_check
-
-  gmail:
-    name: "Gmail"
-    type: "npx"
-    command: "@anthropic/mcp-gmail"
-    env:
-      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID}"
-      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET}"
-      GOOGLE_REFRESH_TOKEN: "${GOOGLE_REFRESH_TOKEN}"
-    description: "Email management"
+    url: "https://rube.app/mcp"
+    auth:
+      type: "bearer"
+      token: "${RUBE_API_TOKEN}"
+    description: |
+      500+ apps via Composio including:
+      - Exa (web search, company research, LinkedIn)
+      - Attio (CRM)
+      - HubSpot (CRM, sales)
+      - Google Calendar, Google Meet
+      - Notion (notes, docs)
+      - Slack, Gmail
+      - GitHub, Linear
+      - And 490+ more apps
 
 # Notes:
-# - type: "npx" runs via npx (most common)
-# - type: "docker" for containerized MCPs
-# - type: "stdio" for local processes
-# - env vars are pulled from process.env at runtime
+# - Rube handles all OAuth and API authentication via Composio
+# - Single MCP endpoint for all integrations
+# - Auth token from https://rube.app dashboard

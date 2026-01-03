@@ -17,6 +17,17 @@ interface ExecutionResult {
   stepsUsed: number;
 }
 
+interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ExecuteOptions {
+  onToolCall?: (toolName: string) => void;
+  onProgress?: (text: string) => void;
+  conversationHistory?: ConversationMessage[];
+}
+
 // Lazy-initialized MCP client
 let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
 
@@ -79,9 +90,17 @@ TOOLS:
 /**
  * Execute a task using AI SDK with Rube MCP tools
  */
-export async function executeTask(task: string): Promise<ExecutionResult> {
+export async function executeTask(
+  task: string,
+  options: ExecuteOptions = {}
+): Promise<ExecutionResult> {
   const startTime = Date.now();
+  const { onToolCall, onProgress, conversationHistory = [] } = options;
+
   console.log(`[AI] Executing task: "${task.slice(0, 80)}..."`);
+  if (conversationHistory.length > 0) {
+    console.log(`[AI] With ${conversationHistory.length} previous messages in thread`);
+  }
 
   try {
     const client = await getMCPClient();
@@ -89,20 +108,30 @@ export async function executeTask(task: string): Promise<ExecutionResult> {
 
     console.log(`[AI] Loaded ${Object.keys(tools).length} tools from Rube MCP`);
 
+    // Build messages array with conversation history
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...conversationHistory,
+      { role: "user" as const, content: task },
+    ];
+
     const result = await generateText({
       model: anthropic("claude-sonnet-4-20250514"),
       system: SYSTEM_PROMPT,
-      prompt: task,
+      messages,
       tools,
       stopWhen: stepCountIs(25),
-      onStepFinish: ({ finishReason, toolCalls, toolResults }) => {
+      onStepFinish: ({ finishReason, toolCalls, toolResults, text }) => {
         if (finishReason === "tool-calls" && toolCalls.length > 0) {
           for (const call of toolCalls) {
             console.log(`[AI] Tool call: ${call.toolName}`);
+            onToolCall?.(call.toolName);
           }
         }
         if (toolResults.length > 0) {
           console.log(`[AI] Tool results received: ${toolResults.length}`);
+        }
+        if (text && onProgress) {
+          onProgress(text);
         }
       },
     });

@@ -22,6 +22,19 @@ function getSlackClient(): WebClient {
   return slackClient;
 }
 
+// Cache bot user ID
+let botUserId: string | null = null;
+async function getBotUserId(): Promise<string> {
+  if (botUserId) {
+    return botUserId;
+  }
+
+  const client = getSlackClient();
+  const result = await client.auth.test();
+  botUserId = result.user_id || "";
+  return botUserId;
+}
+
 // Spinner frames for animation
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -113,13 +126,56 @@ function verifySlackRequest(
 }
 
 /**
+ * Fetch thread history and convert to conversation format
+ */
+async function getThreadHistory(
+  client: WebClient,
+  channel: string,
+  thread_ts: string,
+  botUserId: string
+): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+  try {
+    const result = await client.conversations.replies({
+      channel,
+      ts: thread_ts,
+      limit: 20, // Last 20 messages should be enough context
+    });
+
+    if (!result.messages || result.messages.length <= 1) {
+      return [];
+    }
+
+    // Convert to conversation format, excluding the current message (last one)
+    const history: Array<{ role: "user" | "assistant"; content: string }> = [];
+    const messages = result.messages.slice(0, -1); // Exclude last message (current)
+
+    for (const msg of messages) {
+      if (!msg.text) continue;
+
+      // Clean up bot mentions from text
+      const cleanText = msg.text.replace(/<@[^>]+>/g, "").trim();
+      if (!cleanText) continue;
+
+      const role = msg.user === botUserId ? "assistant" : "user";
+      history.push({ role, content: cleanText });
+    }
+
+    return history;
+  } catch (error) {
+    console.error("[Events] Failed to fetch thread history:", error);
+    return [];
+  }
+}
+
+/**
  * Execute a task and post results to Slack
  */
 async function handleTask(
   task: string,
   channel: string,
   thread_ts: string,
-  isAssistantThread: boolean = false
+  isAssistantThread: boolean = false,
+  botUserId: string = ""
 ): Promise<void> {
   console.log(`[Events] Executing task: "${task.slice(0, 50)}..."`);
 
@@ -141,29 +197,72 @@ async function handleTask(
 
   await updateAssistantStatus("is thinking...");
 
-  // For channels, post a thinking indicator
-  let thinkingMsg: { ts?: string } | null = null;
+  // Fetch thread history for context
+  const conversationHistory = await getThreadHistory(client, channel, thread_ts, botUserId);
+  if (conversationHistory.length > 0) {
+    console.log(`[Events] Loaded ${conversationHistory.length} previous messages from thread`);
+  }
+
+  // Post initial status message
+  let statusMsg: { ts?: string } | null = null;
+  const toolsCalled: string[] = [];
+
   if (!isAssistantThread) {
-    thinkingMsg = await client.chat.postMessage({
+    statusMsg = await client.chat.postMessage({
       channel,
       thread_ts,
       text: "Working...",
       blocks: [
         {
           type: "context",
-          elements: [{ type: "mrkdwn", text: `${SPINNER[0]} _Working on it..._` }],
+          elements: [{ type: "mrkdwn", text: `${SPINNER[0]} _Thinking..._` }],
         },
       ],
     });
   }
 
+  // Helper to update status message with tool progress
+  const updateStatusMessage = async (toolName?: string) => {
+    if (toolName) {
+      toolsCalled.push(toolName);
+    }
+
+    const statusText = toolsCalled.length > 0
+      ? `_Using: ${toolsCalled.slice(-3).join(" → ")}_`
+      : "_Thinking..._";
+
+    if (isAssistantThread) {
+      await updateAssistantStatus(toolsCalled.length > 0 ? `is using ${toolsCalled[toolsCalled.length - 1]}...` : "is thinking...");
+    } else if (statusMsg?.ts) {
+      try {
+        await client.chat.update({
+          channel,
+          ts: statusMsg.ts,
+          text: "Working...",
+          blocks: [
+            {
+              type: "context",
+              elements: [{ type: "mrkdwn", text: `${SPINNER[toolsCalled.length % SPINNER.length]} ${statusText}` }],
+            },
+          ],
+        });
+      } catch {
+        // Ignore update errors
+      }
+    }
+  };
+
   try {
-    await updateAssistantStatus("is working...");
+    const result = await executeTask(task, {
+      conversationHistory,
+      onToolCall: (toolName) => {
+        // Fire and forget - don't await
+        updateStatusMessage(toolName);
+      },
+    });
 
-    const result = await executeTask(task);
     const duration = (result.duration / 1000).toFixed(1);
-
-    console.log(`[Events] Task completed in ${duration}s (${result.stepsUsed} steps)`);
+    console.log(`[Events] Task completed in ${duration}s (${result.stepsUsed} steps, ${toolsCalled.length} tools)`);
 
     await updateAssistantStatus("");
 
@@ -173,10 +272,10 @@ async function handleTask(
       ? [{ type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } }]
       : [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
-    if (thinkingMsg?.ts) {
+    if (statusMsg?.ts) {
       await client.chat.update({
         channel,
-        ts: thinkingMsg.ts,
+        ts: statusMsg.ts,
         text: result.success ? result.output.slice(0, 200) : "Something went wrong",
         blocks: resultBlocks,
       });
@@ -195,10 +294,10 @@ async function handleTask(
 
     const errorBlock = [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
-    if (thinkingMsg?.ts) {
+    if (statusMsg?.ts) {
       await client.chat.update({
         channel,
-        ts: thinkingMsg.ts,
+        ts: statusMsg.ts,
         text: "Something went wrong",
         blocks: errorBlock,
       });
@@ -263,7 +362,10 @@ export async function POST(req: Request): Promise<Response> {
 
       if (text) {
         // Use waitUntil to keep function alive during async processing
-        waitUntil(handleTask(text, channel, thread_ts, false));
+        waitUntil((async () => {
+          const botId = await getBotUserId();
+          await handleTask(text, channel, thread_ts, false, botId);
+        })());
       } else {
         waitUntil(client.chat.postMessage({
           channel,
@@ -298,7 +400,10 @@ export async function POST(req: Request): Promise<Response> {
 
       if (text) {
         // Use waitUntil to keep function alive during async processing
-        waitUntil(handleTask(text, channel, thread_ts, true));
+        waitUntil((async () => {
+          const botId = await getBotUserId();
+          await handleTask(text, channel, thread_ts, true, botId);
+        })());
       }
     }
   }

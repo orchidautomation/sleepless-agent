@@ -11,6 +11,7 @@
 import crypto from "crypto";
 import { WebClient } from "@slack/web-api";
 import { waitUntil } from "@vercel/functions";
+import { executeTask } from "../../lib/ai.js";
 
 // Initialize Slack client lazily
 let slackClient: WebClient | null = null;
@@ -19,26 +20,6 @@ function getSlackClient(): WebClient {
     slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
   }
   return slackClient;
-}
-
-// Lazy imports for heavy modules
-let routeTask: typeof import("../../lib/router.js").routeTask;
-let executeInSandbox: typeof import("../../lib/sandbox.js").executeInSandbox;
-let executeDirectly: typeof import("../../lib/direct-executor.js").executeDirectly;
-
-async function loadModules() {
-  if (!routeTask) {
-    const router = await import("../../lib/router.js");
-    routeTask = router.routeTask;
-  }
-  if (!executeInSandbox) {
-    const sandbox = await import("../../lib/sandbox.js");
-    executeInSandbox = sandbox.executeInSandbox;
-  }
-  if (!executeDirectly) {
-    const direct = await import("../../lib/direct-executor.js");
-    executeDirectly = direct.executeDirectly;
-  }
 }
 
 // Spinner frames for animation
@@ -134,7 +115,7 @@ function verifySlackRequest(
 /**
  * Execute a task and post results to Slack
  */
-async function executeTask(
+async function handleTask(
   task: string,
   channel: string,
   thread_ts: string,
@@ -142,8 +123,6 @@ async function executeTask(
 ): Promise<void> {
   console.log(`[Events] Executing task: "${task.slice(0, 50)}..."`);
 
-  // Load heavy modules
-  await loadModules();
   const client = getSlackClient();
 
   const updateAssistantStatus = async (status: string) => {
@@ -179,30 +158,12 @@ async function executeTask(
   }
 
   try {
-    await updateAssistantStatus("is analyzing the request...");
-    const routing = await routeTask(task);
-    console.log(`[Events] Routed to: ${routing.profile} (${routing.complexity})`);
+    await updateAssistantStatus("is working...");
 
-    let result: { output: string; success: boolean; error?: string };
-    let duration: string;
-    const startTime = Date.now();
+    const result = await executeTask(task);
+    const duration = (result.duration / 1000).toFixed(1);
 
-    // HYBRID ROUTING: Use direct execution for simple tasks, sandbox for complex
-    if (routing.complexity === "simple") {
-      console.log(`[Events] Using FAST direct execution`);
-      await updateAssistantStatus("is responding...");
-      result = await executeDirectly(task);
-      duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    } else {
-      console.log(`[Events] Using FULL sandbox execution`);
-      await updateAssistantStatus(`is working with ${routing.profile} tools...`);
-      result = await executeInSandbox({
-        task,
-        mcps: routing.mcps,
-        timeout: "5m",
-      });
-      duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    }
+    console.log(`[Events] Task completed in ${duration}s (${result.stepsUsed} steps)`);
 
     await updateAssistantStatus("");
 
@@ -302,7 +263,7 @@ export async function POST(req: Request): Promise<Response> {
 
       if (text) {
         // Use waitUntil to keep function alive during async processing
-        waitUntil(executeTask(text, channel, thread_ts, false));
+        waitUntil(handleTask(text, channel, thread_ts, false));
       } else {
         waitUntil(client.chat.postMessage({
           channel,
@@ -337,7 +298,7 @@ export async function POST(req: Request): Promise<Response> {
 
       if (text) {
         // Use waitUntil to keep function alive during async processing
-        waitUntil(executeTask(text, channel, thread_ts, true));
+        waitUntil(handleTask(text, channel, thread_ts, true));
       }
     }
   }

@@ -5,14 +5,11 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { put } from "@vercel/blob";
-import { routeTask } from "../lib/router.js";
-import { executeInSandbox } from "../lib/sandbox.js";
+import { executeTask } from "../lib/ai.js";
 
 interface TaskRequest {
   task: string;
   context?: Record<string, unknown>;
-  profile?: string; // Force a specific profile
-  mcps?: string[]; // Force specific MCPs
   webhook?: string; // URL to call when done
   async?: boolean; // Return immediately, process in background
 }
@@ -20,11 +17,10 @@ interface TaskRequest {
 interface TaskResponse {
   id: string;
   status: "queued" | "processing" | "completed" | "failed";
-  profile?: string;
-  mcps?: string[];
   result?: string;
   error?: string;
   duration?: number;
+  stepsUsed?: number;
 }
 
 // Simple ID generator
@@ -59,56 +55,30 @@ export default async function handler(
   const taskId = generateId();
 
   try {
-    // Route the task to get profile and MCPs
-    let profile: string;
-    let mcps: string[];
-
-    if (body.profile && body.mcps) {
-      // Use explicit profile/mcps if provided
-      profile = body.profile;
-      mcps = body.mcps;
-    } else {
-      // Route automatically
-      const routing = await routeTask(body.task);
-      profile = routing.profile;
-      mcps = routing.mcps;
-      console.log(
-        `Routed to profile: ${profile} (${routing.confidence}) - ${routing.reasoning}`
-      );
-    }
-
     // If async, queue and return immediately
     if (body.async) {
-      // In a real implementation, you'd use a queue (e.g., Vercel KV, Redis)
-      // For now, we'll use waitUntil pattern
       res.status(202).json({
         id: taskId,
         status: "queued",
-        profile,
-        mcps,
       } as TaskResponse);
 
-      // Process in background (Vercel waitUntil or edge runtime)
-      processTaskAsync(taskId, body, profile, mcps);
+      // Process in background
+      processTaskAsync(taskId, body);
       return;
     }
 
     // Synchronous execution
-    const result = await executeInSandbox({
-      task: buildPrompt(body.task, body.context),
-      mcps,
-      timeout: "10m",
-    });
+    const prompt = buildPrompt(body.task, body.context);
+    const result = await executeTask(prompt);
 
     // Store result in Blob
     await storeResult(taskId, {
       task: body.task,
-      profile,
-      mcps,
       result: result.output,
       success: result.success,
       error: result.error,
       duration: result.duration,
+      stepsUsed: result.stepsUsed,
       timestamp: new Date().toISOString(),
     });
 
@@ -125,11 +95,10 @@ export default async function handler(
     res.status(200).json({
       id: taskId,
       status: result.success ? "completed" : "failed",
-      profile,
-      mcps,
       result: result.output,
       error: result.error,
       duration: result.duration,
+      stepsUsed: result.stepsUsed,
     } as TaskResponse);
   } catch (error) {
     console.error("Task execution error:", error);
@@ -201,25 +170,19 @@ async function sendWebhook(
  */
 async function processTaskAsync(
   taskId: string,
-  body: TaskRequest,
-  profile: string,
-  mcps: string[]
+  body: TaskRequest
 ): Promise<void> {
   try {
-    const result = await executeInSandbox({
-      task: buildPrompt(body.task, body.context),
-      mcps,
-      timeout: "10m",
-    });
+    const prompt = buildPrompt(body.task, body.context);
+    const result = await executeTask(prompt);
 
     await storeResult(taskId, {
       task: body.task,
-      profile,
-      mcps,
       result: result.output,
       success: result.success,
       error: result.error,
       duration: result.duration,
+      stepsUsed: result.stepsUsed,
       timestamp: new Date().toISOString(),
     });
 
@@ -235,8 +198,6 @@ async function processTaskAsync(
     console.error("Async task failed:", error);
     await storeResult(taskId, {
       task: body.task,
-      profile,
-      mcps,
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
       timestamp: new Date().toISOString(),

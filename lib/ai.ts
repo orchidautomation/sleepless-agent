@@ -155,7 +155,7 @@ export async function executeTask(
     const result = await withRetry(
       () =>
         generateText({
-          model: anthropic("claude-sonnet-4-5-20250514"),
+          model: anthropic("claude-sonnet-4-5"),
           system: SYSTEM_PROMPT,
           messages,
           tools,

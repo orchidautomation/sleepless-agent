@@ -168,6 +168,104 @@ async function getThreadHistory(
 }
 
 /**
+ * Send ephemeral response to slash command
+ */
+async function sendEphemeral(responseUrl: string, text: string): Promise<void> {
+  await fetch(responseUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: markdownToSlack(text), response_type: "ephemeral" }),
+  });
+}
+
+/**
+ * Handle /ask command - quick private query
+ */
+async function handleAskCommand(
+  text: string,
+  responseUrl: string
+): Promise<void> {
+  if (!text) {
+    await sendEphemeral(responseUrl, "Usage: `/ask [your question]`");
+    return;
+  }
+
+  console.log(`[Commands] /ask: "${text.slice(0, 50)}..."`);
+
+  const result = await executeTask(text);
+  await sendEphemeral(
+    responseUrl,
+    result.success ? result.output : "Something went wrong. Please try again."
+  );
+}
+
+/**
+ * Handle /research command - research then post to channel
+ */
+async function handleResearchCommand(
+  text: string,
+  responseUrl: string,
+  channelId: string
+): Promise<void> {
+  if (!text) {
+    await sendEphemeral(responseUrl, "Usage: `/research [company or topic]`");
+    return;
+  }
+
+  console.log(`[Commands] /research: "${text.slice(0, 50)}..."`);
+
+  await sendEphemeral(responseUrl, `Researching "${text}"...`);
+
+  const result = await executeTask(
+    `Research ${text} thoroughly. Include company overview, products, team, funding, and recent news.`
+  );
+
+  const client = getSlackClient();
+  await client.chat.postMessage({
+    channel: channelId,
+    text: result.success ? result.output.slice(0, 200) : "Research failed",
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: markdownToSlack(
+            result.success ? result.output.slice(0, 2900) : "Something went wrong. Please try again."
+          ),
+        },
+      },
+    ],
+    unfurl_links: false,
+  });
+}
+
+/**
+ * Handle /task command - create Linear issue
+ */
+async function handleTaskCommand(
+  text: string,
+  responseUrl: string
+): Promise<void> {
+  if (!text) {
+    await sendEphemeral(responseUrl, "Usage: `/task [description]`");
+    return;
+  }
+
+  console.log(`[Commands] /task: "${text.slice(0, 50)}..."`);
+
+  const result = await executeTask(
+    `Create a Linear issue with this description: ${text}. Use the Linear MCP tools.`
+  );
+
+  await sendEphemeral(
+    responseUrl,
+    result.success
+      ? `Task created: ${result.output}`
+      : "Failed to create task. Try again."
+  );
+}
+
+/**
  * Execute a task and post results to Slack
  */
 async function handleTask(
@@ -342,6 +440,35 @@ export async function POST(req: Request): Promise<Response> {
   if (!isValid) {
     console.log("[Events] Invalid signature");
     return new Response("Invalid signature", { status: 401 });
+  }
+
+  // Handle slash commands
+  if (body.command) {
+    const command = body.command as string;
+    const text = (body.text as string) || "";
+    const responseUrl = body.response_url as string;
+    const channelId = body.channel_id as string;
+
+    console.log(`[Commands] Received ${command}`);
+
+    // Acknowledge immediately with empty response
+    const response = new Response("", { status: 200 });
+
+    switch (command) {
+      case "/ask":
+        waitUntil(handleAskCommand(text, responseUrl));
+        break;
+      case "/research":
+        waitUntil(handleResearchCommand(text, responseUrl, channelId));
+        break;
+      case "/task":
+        waitUntil(handleTaskCommand(text, responseUrl));
+        break;
+      default:
+        console.log(`[Commands] Unknown command: ${command}`);
+    }
+
+    return response;
   }
 
   // Acknowledge immediately

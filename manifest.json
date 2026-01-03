@@ -21,7 +21,27 @@
     },
     "assistant_view": {
       "assistant_description": "Your personal AI assistant for tasks, research, CRM, and more. Try: 'Research company X' or 'Add contact to CRM'."
-    }
+    },
+    "slash_commands": [
+      {
+        "command": "/ask",
+        "url": "https://sleepless-agent.vercel.app/api/slack/events",
+        "description": "Ask a quick question privately",
+        "should_escape": false
+      },
+      {
+        "command": "/research",
+        "url": "https://sleepless-agent.vercel.app/api/slack/events",
+        "description": "Research a company or topic",
+        "should_escape": false
+      },
+      {
+        "command": "/task",
+        "url": "https://sleepless-agent.vercel.app/api/slack/events",
+        "description": "Create a task in Linear",
+        "should_escape": false
+      }
+    ]
   },
   "oauth_config": {
     "scopes": {
@@ -30,6 +50,7 @@
         "assistant:write",
         "channels:history",
         "chat:write",
+        "commands",
         "groups:history",
         "im:history",
         "im:read",

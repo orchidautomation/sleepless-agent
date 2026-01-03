@@ -8,6 +8,13 @@
 import { generateText, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { createMCPClient } from "@ai-sdk/mcp";
+import { withRetry } from "./retry.js";
+import {
+  estimateMessagesTokens,
+  estimateRequestCost,
+  shouldRejectRequest,
+  getUserFriendlyError,
+} from "./cost-control.js";
 
 interface ExecutionResult {
   output: string;
@@ -102,6 +109,31 @@ export async function executeTask(
     console.log(`[AI] With ${conversationHistory.length} previous messages in thread`);
   }
 
+  // Pre-flight cost check
+  const allMessages = [
+    ...conversationHistory,
+    { role: "user" as const, content: task },
+  ];
+  const inputTokens = estimateMessagesTokens(allMessages);
+  const estimatedCost = estimateRequestCost(inputTokens);
+
+  const costCheck = shouldRejectRequest(estimatedCost);
+  if (costCheck.reject) {
+    console.log(`[AI] Request rejected: ${costCheck.reason}`);
+    return {
+      output:
+        "Your request is too large. Please break it into smaller questions or provide less context.",
+      success: false,
+      error: costCheck.reason,
+      duration: 0,
+      stepsUsed: 0,
+    };
+  }
+
+  console.log(
+    `[AI] Estimated cost: $${estimatedCost.toFixed(4)} (${inputTokens} input tokens)`
+  );
+
   try {
     const client = await getMCPClient();
     const tools = await client.tools();
@@ -114,27 +146,31 @@ export async function executeTask(
       { role: "user" as const, content: task },
     ];
 
-    const result = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
-      system: SYSTEM_PROMPT,
-      messages,
-      tools,
-      stopWhen: stepCountIs(25),
-      onStepFinish: ({ finishReason, toolCalls, toolResults, text }) => {
-        if (finishReason === "tool-calls" && toolCalls.length > 0) {
-          for (const call of toolCalls) {
-            console.log(`[AI] Tool call: ${call.toolName}`);
-            onToolCall?.(call.toolName);
-          }
-        }
-        if (toolResults.length > 0) {
-          console.log(`[AI] Tool results received: ${toolResults.length}`);
-        }
-        if (text && onProgress) {
-          onProgress(text);
-        }
-      },
-    });
+    const result = await withRetry(
+      () =>
+        generateText({
+          model: anthropic("claude-sonnet-4-20250514"),
+          system: SYSTEM_PROMPT,
+          messages,
+          tools,
+          stopWhen: stepCountIs(25),
+          onStepFinish: ({ finishReason, toolCalls, toolResults, text }) => {
+            if (finishReason === "tool-calls" && toolCalls.length > 0) {
+              for (const call of toolCalls) {
+                console.log(`[AI] Tool call: ${call.toolName}`);
+                onToolCall?.(call.toolName);
+              }
+            }
+            if (toolResults.length > 0) {
+              console.log(`[AI] Tool results received: ${toolResults.length}`);
+            }
+            if (text && onProgress) {
+              onProgress(text);
+            }
+          },
+        }),
+      { maxRetries: 3, initialDelayMs: 1000 }
+    );
 
     const duration = Date.now() - startTime;
     const stepsUsed = result.steps?.length || 1;
@@ -153,7 +189,7 @@ export async function executeTask(
     console.error(`[AI] Error: ${errorMsg}`);
 
     return {
-      output: "",
+      output: getUserFriendlyError(errorMsg),
       success: false,
       error: errorMsg,
       duration,

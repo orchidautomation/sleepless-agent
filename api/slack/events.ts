@@ -415,12 +415,20 @@ async function handleTask(
  */
 export async function POST(req: Request): Promise<Response> {
   const rawBody = await req.text();
+  const contentType = req.headers.get("content-type") || "";
 
-  let body;
-  try {
-    body = JSON.parse(rawBody);
-  } catch {
-    return new Response("Invalid JSON", { status: 400 });
+  let body: Record<string, unknown>;
+
+  // Slash commands send form-urlencoded, events send JSON
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const params = new URLSearchParams(rawBody);
+    body = Object.fromEntries(params.entries());
+  } else {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
   }
 
   // Handle URL verification challenge

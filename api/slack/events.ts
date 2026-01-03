@@ -168,6 +168,193 @@ async function getThreadHistory(
 }
 
 /**
+ * Build App Home view blocks
+ */
+function buildHomeView(): object {
+  return {
+    type: "home",
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "Personal OS", emoji: true },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "Your AI assistant for research, tasks, and more.",
+        },
+      },
+      { type: "divider" },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Quick Actions*" },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Research Company", emoji: true },
+            style: "primary",
+            action_id: "action_research",
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Create Task", emoji: true },
+            action_id: "action_task",
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Ask Question", emoji: true },
+            action_id: "action_ask",
+          },
+        ],
+      },
+      { type: "divider" },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: "Use `/ask`, `/research`, or `/task` from any channel for quick access.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Handle App Home opened event
+ */
+async function handleAppHomeOpened(userId: string): Promise<void> {
+  const client = getSlackClient();
+  try {
+    await client.views.publish({
+      user_id: userId,
+      view: buildHomeView() as Parameters<typeof client.views.publish>[0]["view"],
+    });
+    console.log(`[Events] Published home view for user ${userId}`);
+  } catch (error) {
+    console.error("[Events] Failed to publish home view:", error);
+  }
+}
+
+/**
+ * Open modal for user input
+ */
+async function openInputModal(
+  triggerId: string,
+  actionType: "research" | "task" | "ask"
+): Promise<void> {
+  const client = getSlackClient();
+
+  const titles: Record<string, string> = {
+    research: "Research Company",
+    task: "Create Task",
+    ask: "Ask Question",
+  };
+
+  const placeholders: Record<string, string> = {
+    research: "e.g., Stripe, OpenAI, Vercel",
+    task: "e.g., Review PR for authentication fix",
+    ask: "e.g., What's the latest on AI regulations?",
+  };
+
+  const labels: Record<string, string> = {
+    research: "Company or Topic",
+    task: "Task Description",
+    ask: "Your Question",
+  };
+
+  try {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: {
+        type: "modal",
+        callback_id: `modal_${actionType}`,
+        title: { type: "plain_text", text: titles[actionType] },
+        submit: { type: "plain_text", text: "Submit" },
+        close: { type: "plain_text", text: "Cancel" },
+        blocks: [
+          {
+            type: "input",
+            block_id: "input_block",
+            element: {
+              type: "plain_text_input",
+              action_id: "user_input",
+              placeholder: { type: "plain_text", text: placeholders[actionType] },
+            },
+            label: { type: "plain_text", text: labels[actionType] },
+          },
+        ],
+      },
+    });
+  } catch (error) {
+    console.error("[Events] Failed to open modal:", error);
+  }
+}
+
+/**
+ * Handle modal submission
+ */
+async function handleModalSubmission(
+  actionType: string,
+  input: string,
+  userId: string
+): Promise<void> {
+  console.log(`[Events] Modal submission: ${actionType} - "${input.slice(0, 50)}..."`);
+
+  const client = getSlackClient();
+
+  // Open DM with user to send result
+  const dm = await client.conversations.open({ users: userId });
+  const channel = dm.channel?.id;
+
+  if (!channel) {
+    console.error("[Events] Failed to open DM with user");
+    return;
+  }
+
+  // Post status message
+  const statusMsg = await client.chat.postMessage({
+    channel,
+    text: `Working on your ${actionType}...`,
+  });
+
+  // Build the task prompt based on action type
+  let taskPrompt = input;
+  if (actionType === "research") {
+    taskPrompt = `Research ${input} thoroughly. Include company overview, products, team, funding, and recent news.`;
+  } else if (actionType === "task") {
+    taskPrompt = `Create a Linear issue with this description: ${input}. Use the Linear MCP tools.`;
+  }
+
+  const result = await executeTask(taskPrompt);
+
+  // Update with result
+  if (statusMsg.ts) {
+    await client.chat.update({
+      channel,
+      ts: statusMsg.ts,
+      text: result.success ? result.output.slice(0, 200) : "Something went wrong",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: markdownToSlack(
+              result.success ? result.output.slice(0, 2900) : "Something went wrong. Please try again."
+            ),
+          },
+        },
+      ],
+    });
+  }
+}
+
+/**
  * Send ephemeral response to slash command
  */
 async function sendEphemeral(responseUrl: string, text: string): Promise<void> {
@@ -479,15 +666,61 @@ export async function POST(req: Request): Promise<Response> {
     return response;
   }
 
+  // Handle interactivity (button clicks, modal submissions)
+  if (body.payload) {
+    const payload = JSON.parse(body.payload as string);
+    console.log(`[Events] Interactivity type: ${payload.type}`);
+
+    // Handle button clicks
+    if (payload.type === "block_actions") {
+      const action = payload.actions?.[0];
+      const triggerId = payload.trigger_id;
+
+      if (action?.action_id === "action_research") {
+        waitUntil(openInputModal(triggerId, "research"));
+      } else if (action?.action_id === "action_task") {
+        waitUntil(openInputModal(triggerId, "task"));
+      } else if (action?.action_id === "action_ask") {
+        waitUntil(openInputModal(triggerId, "ask"));
+      }
+
+      return new Response("", { status: 200 });
+    }
+
+    // Handle modal submissions
+    if (payload.type === "view_submission") {
+      const callbackId = payload.view?.callback_id || "";
+      const actionType = callbackId.replace("modal_", "");
+      const input = payload.view?.state?.values?.input_block?.user_input?.value || "";
+      const userId = payload.user?.id;
+
+      if (input && userId) {
+        waitUntil(handleModalSubmission(actionType, input, userId));
+      }
+
+      // Return empty response to close modal
+      return new Response("", { status: 200 });
+    }
+  }
+
   // Acknowledge immediately
   const response = new Response("ok", { status: 200 });
 
   // Process event asynchronously
   if (body.event) {
-    const event = body.event;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const event = body.event as any;
     console.log(`[Events] Event type: ${event.type}`);
 
     const client = getSlackClient();
+
+    // Handle app_home_opened
+    if (event.type === "app_home_opened") {
+      const userId = event.user;
+      if (userId) {
+        waitUntil(handleAppHomeOpened(userId));
+      }
+    }
 
     // Handle app_mention
     if (event.type === "app_mention") {

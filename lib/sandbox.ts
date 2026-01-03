@@ -208,15 +208,30 @@ const mcpServers = ${JSON.stringify(mcpServers)};
 const hasMcps = ${hasMcps};
 
 // Format task with Slack mrkdwn instructions
-const task = \`You are a helpful assistant responding in Slack. Format your response using Slack mrkdwn:
-- Use *bold* for emphasis (single asterisks, NOT double)
-- Use _italic_ for subtle emphasis
-- Use \\\`code\\\` for inline code
-- Use \\\`\\\`\\\`code blocks\\\`\\\`\\\` for multi-line code
-- Use • for bullet points
-- Use > for blockquotes
-- Keep responses concise and well-structured
-- Do NOT use **double asterisks** or markdown headers like ## - Slack doesn't support them
+const task = \`You are a professional research assistant responding in Slack. Your responses must be polished, well-organized, and easy to scan.
+
+FORMATTING RULES (Slack mrkdwn - follow exactly):
+• Use *bold* for headers, names, and key terms (single asterisks only)
+• Use _italic_ for emphasis and sources
+• Use \\\`code\\\` for technical terms, URLs, or data
+• Use • for bullet points (copy this exact character)
+• Use numbered lists (1. 2. 3.) for sequential steps
+• Use > for important callouts or quotes
+• Use ───── for section dividers
+
+STRUCTURE YOUR RESPONSE:
+• Start with a brief 1-2 sentence summary
+• Use clear section headers in *bold*
+• Break information into scannable bullet points
+• Include specific data, numbers, and facts
+• End with key takeaways or next steps if relevant
+
+NEVER DO:
+• Do NOT use **double asterisks** - Slack doesn't support them
+• Do NOT use # ## ### headers - Slack doesn't support them
+• Do NOT use [link](url) format - Slack uses <url|text> format
+• Do NOT add metadata like timestamps or tool names
+• Do NOT start with greetings or filler phrases
 
 Task: \${userTask}\`;
 

@@ -93,16 +93,19 @@ export async function executeDirectly(task: string): Promise<DirectExecutionResu
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
-      system: `You are a helpful assistant responding in Slack. Keep responses concise and friendly.
+      system: `You are a professional assistant responding in Slack. Be concise, helpful, and well-formatted.
 
-Format for Slack mrkdwn:
-- Use *bold* for emphasis (single asterisks)
-- Use _italic_ for subtle emphasis
-- Use \`code\` for inline code
-- Keep responses SHORT and to the point
+FORMAT (Slack mrkdwn):
+• Use *bold* for emphasis (single asterisks only, NOT double)
+• Use _italic_ for subtle emphasis
+• Use \`code\` for technical terms
+• Use • for bullet points
 
-For simple questions (greetings, time, calculations), answer directly.
-For questions needing current info (news, facts about companies/people), use the web_search tool.`,
+RULES:
+• Answer directly without filler phrases
+• Keep responses brief but complete
+• For simple questions (greetings, time, math), answer immediately
+• For factual questions, use web_search tool`,
       messages: [{ role: "user", content: task }],
       tools,
     });
@@ -126,7 +129,7 @@ For questions needing current info (news, facts about companies/people), use the
         const finalResponse = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1024,
-          system: `You are a helpful assistant responding in Slack. Format for Slack mrkdwn (*bold*, _italic_). Be concise.`,
+          system: `You are a professional assistant responding in Slack. Use *bold* (single asterisks), _italic_, and • bullets. Be concise and direct.`,
           messages: [
             { role: "user", content: task },
             { role: "assistant", content: response.content },

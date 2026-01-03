@@ -46,19 +46,55 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 
 /**
  * Convert markdown to Slack mrkdwn format
+ * Handles: headings, bold, italic, links, code, lists, tables, dividers
  */
 function markdownToSlack(text: string): string {
-  return text
-    .replace(/^###\s+(.+)$/gm, "*$1*")
-    .replace(/^##\s+(.+)$/gm, "*$1*")
-    .replace(/^#\s+(.+)$/gm, "*$1*")
-    .replace(/\*\*([^*]+?)\*\*/g, "*$1*")
-    .replace(/\*\*\*([^*]+?)\*\*\*/g, "*_$1_*")
-    .replace(/__([^_]+?)__/g, "_$1_")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
-    .replace(/^[-*]{3,}$/gm, "───────────────────")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/\*\*+/g, "*");
+  let result = text;
+
+  // Convert headings to bold with line breaks for visual hierarchy
+  result = result.replace(/^###\s+(.+)$/gm, "\n*$1*");
+  result = result.replace(/^##\s+(.+)$/gm, "\n*$1*");
+  result = result.replace(/^#\s+(.+)$/gm, "\n*$1*\n");
+
+  // Convert bold (** or __)
+  result = result.replace(/\*\*\*([^*]+?)\*\*\*/g, "*_$1_*"); // bold italic
+  result = result.replace(/\*\*([^*]+?)\*\*/g, "*$1*");
+  result = result.replace(/__([^_]+?)__/g, "*$1*");
+
+  // Convert links [text](url) to Slack format <url|text>
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
+
+  // Convert inline code (but not code blocks)
+  result = result.replace(/`([^`\n]+)`/g, "`$1`");
+
+  // Convert markdown tables to formatted text
+  // Detect table rows and format them nicely
+  result = result.replace(/^\|(.+)\|$/gm, (match, content) => {
+    const cells = content.split("|").map((c: string) => c.trim());
+    // Skip separator rows (----)
+    if (cells.every((c: string) => /^[-:]+$/.test(c))) {
+      return "─".repeat(40);
+    }
+    return cells.join("  |  ");
+  });
+
+  // Convert markdown lists with proper bullets
+  result = result.replace(/^[-*]\s+/gm, "• ");
+  result = result.replace(/^\d+\.\s+/gm, (match) => match); // Keep numbered lists as-is
+
+  // Convert horizontal rules
+  result = result.replace(/^[-*]{3,}$/gm, "────────────────────────────");
+
+  // Clean up excessive whitespace
+  result = result.replace(/\n{3,}/g, "\n\n");
+
+  // Fix any double asterisks that slipped through
+  result = result.replace(/\*\*+/g, "*");
+
+  // Trim leading/trailing whitespace
+  result = result.trim();
+
+  return result;
 }
 
 /**
@@ -126,17 +162,17 @@ async function executeTask(
 
   await updateAssistantStatus("is thinking...");
 
-  // For channels, post a thinking message
+  // For channels, post a thinking indicator
   let thinkingMsg: { ts?: string } | null = null;
   if (!isAssistantThread) {
     thinkingMsg = await client.chat.postMessage({
       channel,
       thread_ts,
-      text: "Analyzing your request...",
+      text: "Working...",
       blocks: [
         {
-          type: "section",
-          text: { type: "mrkdwn", text: `${SPINNER[0]} *Analyzing your request...*` },
+          type: "context",
+          elements: [{ type: "mrkdwn", text: `${SPINNER[0]} _Working on it..._` }],
         },
       ],
     });
@@ -170,58 +206,47 @@ async function executeTask(
 
     await updateAssistantStatus("");
 
-    // Build result blocks - different format for simple vs complex
+    // Build result blocks - clean output only, no metadata
     const output = markdownToSlack(result.output);
     const resultBlocks = result.success
-      ? routing.complexity === "simple"
-        ? [
-            // Simple: Just show the response, minimal chrome
-            { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
-            { type: "context", elements: [{ type: "mrkdwn", text: `_${duration}s_` }] },
-          ]
-        : [
-            // Complex: Show full metadata
-            { type: "section", text: { type: "mrkdwn", text: `✅ *Task completed* _${duration}s_` } },
-            { type: "context", elements: [{ type: "mrkdwn", text: `🎯 ${routing.profile} • 📦 ${routing.mcps.join(", ")}` }] },
-            { type: "divider" },
-            { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
-          ]
-      : [
-          { type: "section", text: { type: "mrkdwn", text: `❌ *Task failed*\n\n${result.error || "Unknown error"}` } },
-        ];
+      ? [{ type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } }]
+      : [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
     if (thinkingMsg?.ts) {
       await client.chat.update({
         channel,
         ts: thinkingMsg.ts,
-        text: result.success ? `Task completed in ${duration}s` : "Task failed",
+        text: result.success ? result.output.slice(0, 200) : "Something went wrong",
         blocks: resultBlocks,
       });
     } else {
       await client.chat.postMessage({
         channel,
         thread_ts,
-        text: result.success ? `Task completed in ${duration}s` : "Task failed",
+        text: result.success ? result.output.slice(0, 200) : "Something went wrong",
         blocks: resultBlocks,
         unfurl_links: false,
       });
     }
   } catch (error) {
     await updateAssistantStatus("");
-    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[Events] Task error:", error);
+
+    const errorBlock = [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
     if (thinkingMsg?.ts) {
       await client.chat.update({
         channel,
         ts: thinkingMsg.ts,
-        text: "Error",
-        blocks: [{ type: "section", text: { type: "mrkdwn", text: `❌ *Error*\n\n${errorMsg}` } }],
+        text: "Something went wrong",
+        blocks: errorBlock,
       });
     } else {
       await client.chat.postMessage({
         channel,
         thread_ts,
-        text: `Error: ${errorMsg}`,
+        text: "Something went wrong. Please try again.",
+        blocks: errorBlock,
       });
     }
   }

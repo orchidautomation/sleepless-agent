@@ -90,9 +90,15 @@ RESPONSE STYLE:
 • Include specific data and numbers
 • No greetings or filler phrases
 
-TOOLS:
-• You have 500+ apps via Rube MCP (Attio, Linear, Gmail, Slack, GitHub, Notion, Google Calendar, etc.)
-• Use tools proactively to complete requests`;
+TOOLS & PREFERENCES:
+• You have 500+ apps via Rube MCP - use tools proactively to complete requests
+• *CRM*: Use Attio for all contact, company, and deal management
+• *People/Company Research*: Use Exa for searching people, companies, LinkedIn profiles
+• *Tasks*: Use Linear for issue/task creation and management
+• *Email*: Use Gmail for sending and reading emails
+• *Calendar*: Use Google Calendar for scheduling
+• *Documents*: Use Notion for notes and documentation
+• *Code*: Use GitHub for repository operations`;
 
 /**
  * Execute a task using AI SDK with Rube MCP tools
@@ -149,7 +155,7 @@ export async function executeTask(
     const result = await withRetry(
       () =>
         generateText({
-          model: anthropic("claude-sonnet-4-20250514"),
+          model: anthropic("claude-sonnet-4-5-20250514"),
           system: SYSTEM_PROMPT,
           messages,
           tools,

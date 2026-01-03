@@ -9,6 +9,7 @@
 
 // Claude pricing (per 1K tokens) - January 2025
 const PRICING = {
+  "claude-sonnet-4-5": { input: 0.003, output: 0.015 },
   "claude-sonnet-4": { input: 0.003, output: 0.015 },
   "claude-haiku": { input: 0.00025, output: 0.00125 },
 } as const;

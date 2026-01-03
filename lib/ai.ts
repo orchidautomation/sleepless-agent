@@ -35,7 +35,7 @@ async function getMCPClient() {
 
   mcpClient = await createMCPClient({
     transport: {
-      type: "sse",
+      type: "http",
       url: "https://rube.app/mcp",
       headers: {
         Authorization: `Bearer ${rubeToken}`,

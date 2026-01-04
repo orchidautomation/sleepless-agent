@@ -258,7 +258,7 @@ export async function executeTask(
           system: SYSTEM_PROMPT,
           messages,
           tools,
-          stopWhen: stepCountIs(50),
+          stopWhen: stepCountIs(150),
           onStepFinish: ({ finishReason, toolCalls, toolResults, text }) => {
             stepsUsed++;
             if (finishReason === "tool-calls" && toolCalls.length > 0) {

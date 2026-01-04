@@ -488,8 +488,9 @@ async function handleTask(
     console.log(`[Events] Loaded ${conversationHistory.length} previous messages from thread`);
   }
 
-  // Post initial status message
+  // Post initial status message (for both regular and assistant threads)
   let statusMsg: { ts?: string } | null = null;
+  let streamMsgTs: string | null = null; // Track stream message for updates
   const toolsCalled: string[] = [];
 
   if (!isAssistantThread) {
@@ -544,6 +545,48 @@ async function handleTask(
         // Fire and forget - don't await
         updateStatusMessage(toolName);
       },
+      onStreamUpdate: async (streamedText) => {
+        // Update message with streamed text as it arrives
+        if (!streamedText || streamedText.length < 20) return; // Wait for meaningful content
+
+        const output = markdownToSlack(streamedText);
+        const streamBlocks = [
+          { type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } },
+          { type: "context", elements: [{ type: "mrkdwn", text: `${SPINNER[Math.floor(Date.now() / 200) % SPINNER.length]} _Generating..._` }] },
+        ];
+
+        try {
+          if (isAssistantThread) {
+            // For assistant threads, post first message then update it
+            if (!streamMsgTs) {
+              const msg = await client.chat.postMessage({
+                channel,
+                thread_ts,
+                text: streamedText.slice(0, 200),
+                blocks: streamBlocks,
+                unfurl_links: false,
+              });
+              streamMsgTs = msg.ts || null;
+            } else {
+              await client.chat.update({
+                channel,
+                ts: streamMsgTs,
+                text: streamedText.slice(0, 200),
+                blocks: streamBlocks,
+              });
+            }
+          } else if (statusMsg?.ts) {
+            await client.chat.update({
+              channel,
+              ts: statusMsg.ts,
+              text: streamedText.slice(0, 200),
+              blocks: streamBlocks,
+            });
+          }
+        } catch (updateErr) {
+          console.error("[Events] Stream update failed:", updateErr);
+        }
+      },
     });
 
     const duration = (result.duration / 1000).toFixed(1);
@@ -557,10 +600,12 @@ async function handleTask(
       ? [{ type: "section", text: { type: "mrkdwn", text: output.slice(0, 2900) } }]
       : [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
-    if (statusMsg?.ts) {
+    // Update the appropriate message with final result
+    const msgTs = statusMsg?.ts || streamMsgTs;
+    if (msgTs) {
       await client.chat.update({
         channel,
-        ts: statusMsg.ts,
+        ts: msgTs,
         text: result.success ? result.output.slice(0, 200) : "Something went wrong",
         blocks: resultBlocks,
       });
@@ -579,10 +624,11 @@ async function handleTask(
 
     const errorBlock = [{ type: "section", text: { type: "mrkdwn", text: `Something went wrong. Please try again.` } }];
 
-    if (statusMsg?.ts) {
+    const msgTs = statusMsg?.ts || streamMsgTs;
+    if (msgTs) {
       await client.chat.update({
         channel,
-        ts: statusMsg.ts,
+        ts: msgTs,
         text: "Something went wrong",
         blocks: errorBlock,
       });

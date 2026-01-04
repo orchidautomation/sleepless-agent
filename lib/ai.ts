@@ -5,8 +5,8 @@
  * Replaces the sandbox-based approach with direct AI SDK calls.
  */
 
-import { generateText, stepCountIs } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { streamText, stepCountIs } from "ai";
+import { gateway } from "@ai-sdk/gateway";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { withRetry } from "./retry.js";
 import {
@@ -32,8 +32,12 @@ interface ConversationMessage {
 interface ExecuteOptions {
   onToolCall?: (toolName: string) => void;
   onProgress?: (text: string) => void;
+  onStreamUpdate?: (text: string) => Promise<void>;
   conversationHistory?: ConversationMessage[];
 }
+
+// Streaming update interval (ms)
+const STREAM_UPDATE_INTERVAL = 1500;
 
 // Lazy-initialized MCP client
 let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
@@ -76,19 +80,109 @@ Brandon Guerrero - Founder of Orchid Automation & Orchid Labs
 • Expertise: GTM tech stacks, RevOps, AI agents, Claude Code
 • Based in Miami
 
-FORMATTING (Slack mrkdwn):
-• Use *bold* for headers and key terms (single asterisks only)
-• Use _italic_ for emphasis
-• Use \`code\` for technical terms
-• Use • for bullet points
-• Use > for callouts
-• Do NOT use **double asterisks**, # headers, or [link](url) format
+FORMATTING (Slack mrkdwn - use liberally for visual clarity):
+• *Bold headers* for sections (single asterisks): *Summary*, *Details*, *Next Steps*
+• _Italic_ for emphasis on key terms
+• \`code\` for technical terms, IDs, commands
+• Bullet points (•) for lists - indent with spaces for sub-items
+• > Blockquotes for callouts, warnings, or highlighting important info
+• Dividers: use --- sparingly to separate major sections
+• Links: <https://url.com|Display Text>
+• Do NOT use **double asterisks**, # headers, or [markdown](links)
+• Minimal emojis - only when truly helpful (✓ for success, ⚠️ for warnings), never decorative
+
+TABLES (use for comparisons, data, options):
+\`\`\`
+| Column 1   | Column 2   | Column 3   |
+|------------|------------|------------|
+| Data       | Data       | Data       |
+\`\`\`
+
+Example use cases for tables:
+• Comparing options or plans
+• Showing metrics/data side by side
+• Listing contacts with details
+• Summarizing research findings
+
+VISUAL STRUCTURE:
+Organize responses with clear sections when appropriate:
+
+*Section Header*
+• Point one
+• Point two
+  • Sub-point (indented)
+
+> Key insight or callout here
+
+| Option | Pros | Cons |
+|--------|------|------|
+| A      | Fast | Cost |
+| B      | Cheap| Slow |
+
+Keep it scannable - busy professionals skim. Front-load the important info.
 
 RESPONSE STYLE:
 • Direct and actionable - no fluff
 • Start with the answer, then details
 • Include specific data and numbers
 • No greetings or filler phrases
+• NEVER narrate your process (no "I'll search for...", "Let me look up...", "I'll find...")
+• Just deliver the information directly - users don't need to know how you got it
+
+ACTION CONFIRMATIONS:
+When you create, update, or modify any record, ALWAYS end with a compact confirmation that includes:
+1. What was done (bolded)
+2. Key details on one line
+3. Direct link to the record using Slack format
+
+Format examples:
+*Contact created:* John Smith (Acme Corp)
+Email: john@acme.com | Phone: +1-555-1234
+→ <https://app.attio.com/workspace/records/abc123|Open in Attio>
+
+*Issue created:* ORC-123 - Fix login bug
+Priority: High | Assignee: Brandon
+→ <https://linear.app/orchid/issue/ORC-123|Open in Linear>
+
+*Meeting scheduled:* Discovery Call with Acme
+Thu Jan 9, 2:00 PM EST (30 min)
+→ <https://calendar.google.com/calendar/event?eid=abc123|Open in Calendar>
+
+*Page created:* Q1 Planning Notes
+→ <https://notion.so/abc123|Open in Notion>
+
+LINK EXTRACTION:
+Tool responses contain URLs or IDs - always extract and include them:
+• Attio: Look for record URLs or construct from record_id
+• Linear: Use the issue identifier (e.g., ORC-123) in the URL
+• Google Calendar: Use htmlLink from event response
+• Notion: Use the page URL from response
+• If a link isn't returned, still confirm the action was completed
+
+TIMEZONE:
+• Always use EST (Miami time) for all scheduling and time references
+• Convert any times mentioned to EST
+• When creating calendar events, use America/New_York timezone
+
+RESEARCH FORMAT (when looking up people/companies with Exa):
+*[Name]* - [Title] at [Company]
+• LinkedIn: <url|Profile>
+• Background: [2-3 key facts - experience, expertise, notable work]
+• Source: <url|Article/Page title>
+
+For companies:
+*[Company Name]* - [One-line description]
+• Website: <url|domain.com>
+• Key info: [What they do, size, funding if relevant]
+• Source: <url|Source title>
+
+BATCH ACTIONS:
+When completing multiple actions in one request, list all confirmations at the end:
+
+*Actions completed:*
+1. Contact created: John Smith → <url|Attio>
+2. Meeting scheduled: Thu 2pm → <url|Calendar>
+3. Task created: ORC-123 → <url|Linear>
 
 TOOLS & PREFERENCES:
 • You have 500+ apps via Rube MCP - use tools proactively to complete requests
@@ -108,7 +202,7 @@ export async function executeTask(
   options: ExecuteOptions = {}
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
-  const { onToolCall, onProgress, conversationHistory = [] } = options;
+  const { onToolCall, onProgress, onStreamUpdate, conversationHistory = [] } = options;
 
   console.log(`[AI] Executing task: "${task.slice(0, 80)}..."`);
   if (conversationHistory.length > 0) {
@@ -152,15 +246,21 @@ export async function executeTask(
       { role: "user" as const, content: task },
     ];
 
+    // Track streaming state
+    let accumulatedText = "";
+    let lastUpdateTime = Date.now();
+    let stepsUsed = 0;
+
     const result = await withRetry(
-      () =>
-        generateText({
-          model: anthropic("claude-sonnet-4-5"),
+      async () => {
+        const { textStream, steps } = streamText({
+          model: gateway("google/gemini-3-flash"),
           system: SYSTEM_PROMPT,
           messages,
           tools,
-          stopWhen: stepCountIs(25),
+          stopWhen: stepCountIs(50),
           onStepFinish: ({ finishReason, toolCalls, toolResults, text }) => {
+            stepsUsed++;
             if (finishReason === "tool-calls" && toolCalls.length > 0) {
               for (const call of toolCalls) {
                 console.log(`[AI] Tool call: ${call.toolName}`);
@@ -174,12 +274,34 @@ export async function executeTask(
               onProgress(text);
             }
           },
-        }),
+        });
+
+        // Consume the stream and periodically update Slack
+        for await (const chunk of textStream) {
+          accumulatedText += chunk;
+
+          // Send periodic updates to Slack
+          const now = Date.now();
+          if (onStreamUpdate && now - lastUpdateTime >= STREAM_UPDATE_INTERVAL) {
+            lastUpdateTime = now;
+            try {
+              await onStreamUpdate(accumulatedText);
+              console.log(`[AI] Stream update sent (${accumulatedText.length} chars)`);
+            } catch (updateError) {
+              console.error("[AI] Stream update failed:", updateError);
+            }
+          }
+        }
+
+        // Wait for all steps to complete
+        await steps;
+
+        return { text: accumulatedText };
+      },
       { maxRetries: 3, initialDelayMs: 1000 }
     );
 
     const duration = Date.now() - startTime;
-    const stepsUsed = result.steps?.length || 1;
 
     console.log(`[AI] Completed in ${duration}ms using ${stepsUsed} steps`);
 

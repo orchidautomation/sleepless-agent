@@ -8,8 +8,8 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useState } from "react";
-import { executeTask } from "./api";
+import { useState, useEffect, useRef } from "react";
+import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./history";
 import type { Preferences, TaskResponse } from "./types";
 
@@ -48,27 +48,124 @@ ${response.result || "No response received."}
   );
 }
 
-function LoadingView({ task }: { task: string }) {
-  return (
-    <Detail
-      isLoading={true}
-      markdown={`# Processing...
+function StreamingView({ task }: { task: string }) {
+  const [streamedText, setStreamedText] = useState("");
+  const [currentTool, setCurrentTool] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [response, setResponse] = useState<TaskResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const preferences = getPreferenceValues<Preferences>();
+  const hasStarted = useRef(false);
+
+  useEffect(() => {
+    // Prevent double execution in React strict mode
+    if (hasStarted.current) return;
+    hasStarted.current = true;
+
+    async function startStreaming() {
+      try {
+        const result = await executeTaskStreaming(task, {
+          onText: (text) => {
+            setStreamedText(text);
+            setCurrentTool(null);
+          },
+          onTool: (toolName) => {
+            setCurrentTool(toolName);
+          },
+        });
+
+        setResponse(result);
+        setIsLoading(false);
+
+        // Save to history if enabled
+        if (preferences.saveHistory && result.result) {
+          await addToHistory({
+            id: result.id,
+            task,
+            result: result.result,
+            duration: result.duration,
+            stepsUsed: result.stepsUsed,
+          });
+        }
+
+        showToast({
+          style: result.status === "completed" ? Toast.Style.Success : Toast.Style.Failure,
+          title: result.status === "completed" ? "Task Completed" : "Task Failed",
+          message:
+            result.status === "completed"
+              ? `Completed in ${result.duration ? `${(result.duration / 1000).toFixed(1)}s` : "N/A"}`
+              : result.error || "Unknown error",
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        setError(errorMessage);
+        setIsLoading(false);
+        showToast({
+          style: Toast.Style.Failure,
+          title: "Task Failed",
+          message: errorMessage,
+        });
+      }
+    }
+
+    startStreaming();
+  }, [task, preferences.saveHistory]);
+
+  if (error) {
+    return (
+      <Detail
+        markdown={`# Error
+
+Something went wrong while processing your request.
+
+**Error:** ${error}
 
 **Task:** ${task}
 
-The Sleepless Agent is working on your request. This may take a moment as it accesses various tools and services.
+Please check your API key and try again.`}
+        actions={
+          <ActionPanel>
+            <Action.CopyToClipboard title="Copy Error" content={error} />
+          </ActionPanel>
+        }
+      />
+    );
+  }
 
-_Please wait..._`}
+  // Show final result view when done
+  if (!isLoading && response) {
+    return <ResultView task={task} response={{ ...response, result: streamedText || response.result }} />;
+  }
+
+  // Show streaming view while loading
+  const statusLine = currentTool ? `🔧 Using: \`${currentTool}\`` : "⏳ _Thinking..._";
+
+  const markdown = `# Processing...
+
+**Task:** ${task}
+
+${statusLine}
+
+---
+
+${streamedText || "_Waiting for response..._"}`;
+
+  return (
+    <Detail
+      isLoading={isLoading}
+      markdown={markdown}
+      actions={
+        <ActionPanel>
+          <Action.CopyToClipboard title="Copy Current Text" content={streamedText} />
+        </ActionPanel>
+      }
     />
   );
 }
 
 export default function AskCommand() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [currentTask, setCurrentTask] = useState<string | null>(null);
-  const [response, setResponse] = useState<TaskResponse | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { push } = useNavigation();
-  const preferences = getPreferenceValues<Preferences>();
 
   async function handleSubmit(values: { task: string }) {
     if (!values.task.trim()) {
@@ -80,65 +177,23 @@ export default function AskCommand() {
       return;
     }
 
-    setCurrentTask(values.task);
-    setIsLoading(true);
+    setIsSubmitting(true);
 
-    // Navigate to loading view
-    push(<LoadingView task={values.task} />);
+    showToast({
+      style: Toast.Style.Animated,
+      title: "Processing...",
+      message: "Sleepless Agent is working",
+    });
 
-    try {
-      const result = await executeTask(values.task);
-      setResponse(result);
+    // Navigate to streaming view
+    push(<StreamingView task={values.task} />);
 
-      // Save to history if enabled
-      if (preferences.saveHistory && result.result) {
-        await addToHistory({
-          id: result.id,
-          task: values.task,
-          result: result.result,
-          duration: result.duration,
-          stepsUsed: result.stepsUsed,
-        });
-      }
-
-      // Navigate to result view
-      push(<ResultView task={values.task} response={result} />);
-
-      showToast({
-        style: Toast.Style.Success,
-        title: "Task Completed",
-        message: `Completed in ${result.duration ? `${(result.duration / 1000).toFixed(1)}s` : "N/A"}`,
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Task Failed",
-        message: errorMessage,
-      });
-
-      // Show error in detail view
-      push(
-        <Detail
-          markdown={`# Error
-
-Something went wrong while processing your request.
-
-**Error:** ${errorMessage}
-
-**Task:** ${values.task}
-
-Please check your API key and try again.`}
-        />
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    setIsSubmitting(false);
   }
 
   return (
     <Form
-      isLoading={isLoading}
+      isLoading={isSubmitting}
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Ask Sleepless Agent" onSubmit={handleSubmit} />

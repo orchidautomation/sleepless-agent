@@ -9,8 +9,8 @@ import {
   Clipboard,
   getSelectedText,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
-import { executeTask } from "./api";
+import { useEffect, useState, useRef } from "react";
+import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./history";
 import type { Preferences, TaskResponse } from "./types";
 
@@ -21,11 +21,18 @@ interface QuickAskArguments {
 export default function QuickAskCommand(props: LaunchProps<{ arguments: QuickAskArguments }>) {
   const [isLoading, setIsLoading] = useState(true);
   const [task, setTask] = useState<string>("");
+  const [streamedText, setStreamedText] = useState("");
+  const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [response, setResponse] = useState<TaskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preferences = getPreferenceValues<Preferences>();
+  const hasStarted = useRef(false);
 
   useEffect(() => {
+    // Prevent double execution in React strict mode
+    if (hasStarted.current) return;
+    hasStarted.current = true;
+
     async function run() {
       // Determine the task: argument > selected text > clipboard
       let taskText = props.arguments.query;
@@ -64,7 +71,16 @@ export default function QuickAskCommand(props: LaunchProps<{ arguments: QuickAsk
           message: "Sleepless Agent is working",
         });
 
-        const result = await executeTask(taskText);
+        const result = await executeTaskStreaming(taskText, {
+          onText: (text) => {
+            setStreamedText(text);
+            setCurrentTool(null);
+          },
+          onTool: (toolName) => {
+            setCurrentTool(toolName);
+          },
+        });
+
         setResponse(result);
 
         // Save to history if enabled
@@ -97,7 +113,7 @@ export default function QuickAskCommand(props: LaunchProps<{ arguments: QuickAsk
     }
 
     run();
-  }, []);
+  }, [props.arguments.query, preferences.saveHistory]);
 
   if (error) {
     return (
@@ -109,45 +125,67 @@ ${error}
 ${task ? `**Task:** ${task}` : ""}
 
 Please check your API key and try again.`}
+        actions={
+          <ActionPanel>
+            <Action.CopyToClipboard title="Copy Error" content={error} />
+          </ActionPanel>
+        }
       />
     );
   }
 
-  if (isLoading || !response) {
-    return (
-      <Detail
-        isLoading={true}
-        markdown={`# Processing...
+  // Show final result when done
+  if (!isLoading && response) {
+    const finalText = streamedText || response.result || "";
+    const markdown = `# Result
 
-${task ? `**Task:** ${task}` : "Loading..."}
-
-The Sleepless Agent is working on your request.`}
-      />
-    );
-  }
-
-  const markdown = `# Result
-
-${response.result || "No response received."}
+${finalText}
 
 ---
 
 **Task:** ${task}
 **Duration:** ${response.duration ? `${(response.duration / 1000).toFixed(1)}s` : "N/A"}
+**Steps Used:** ${response.stepsUsed || "N/A"}
 `;
+
+    return (
+      <Detail
+        markdown={markdown}
+        actions={
+          <ActionPanel>
+            <Action.CopyToClipboard title="Copy Result" content={finalText} />
+            <Action.Paste title="Paste Result" content={finalText} />
+            <Action.CopyToClipboard
+              title="Copy Task ID"
+              content={response.id}
+              shortcut={{ modifiers: ["cmd"], key: "i" }}
+            />
+          </ActionPanel>
+        }
+      />
+    );
+  }
+
+  // Show streaming view while loading
+  const statusLine = currentTool ? `🔧 Using: \`${currentTool}\`` : "⏳ _Thinking..._";
+
+  const markdown = `# Processing...
+
+${task ? `**Task:** ${task}` : "Loading..."}
+
+${statusLine}
+
+---
+
+${streamedText || "_Waiting for response..._"}`;
 
   return (
     <Detail
+      isLoading={isLoading}
       markdown={markdown}
       actions={
         <ActionPanel>
-          <Action.CopyToClipboard title="Copy Result" content={response.result || ""} />
-          <Action.Paste title="Paste Result" content={response.result || ""} />
-          <Action.CopyToClipboard
-            title="Copy Task ID"
-            content={response.id}
-            shortcut={{ modifiers: ["cmd"], key: "i" }}
-          />
+          <Action.CopyToClipboard title="Copy Current Text" content={streamedText} />
         </ActionPanel>
       }
     />

@@ -25,6 +25,5 @@ export interface HistoryItem {
 export interface Preferences {
   apiKey: string;
   apiEndpoint: string;
-  streamResponse: boolean;
   saveHistory: boolean;
 }

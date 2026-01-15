@@ -7,6 +7,8 @@ AI assistant powered by Sleepless Agent with access to 500+ MCP tools for CRM, e
 - **Ask Sleepless Agent**: Full-featured form to ask questions or request tasks
 - **Quick Ask**: Quickly process selected text, clipboard content, or inline arguments
 - **Task History**: View and search your recent tasks and their results
+- **Streaming Responses**: See responses appear in real-time as the AI generates them
+- **Tool Indicators**: Watch which tools the agent is using as it works
 
 ## Installation
 
@@ -32,7 +34,6 @@ AI assistant powered by Sleepless Agent with access to 500+ MCP tools for CRM, e
 ### Optional Settings
 
 - **API Endpoint**: Custom endpoint if you're running a self-hosted version
-- **Stream Response**: Enable/disable streaming (for future enhancement)
 - **Save History**: Toggle local task history storage
 
 ## Commands
@@ -88,19 +89,27 @@ npm run publish
 
 ## API Reference
 
-This extension uses the `/api/task` endpoint:
+This extension uses the streaming `/api/task/stream` endpoint (SSE):
 
 ```typescript
-POST /api/task
+POST /api/task/stream
 Headers: {
   "Content-Type": "application/json",
   "X-API-Key": "<YOUR_API_KEY>"
 }
 Body: {
-  "task": "Your prompt here",
-  "async": false  // Set to true for background processing
+  "task": "Your prompt here"
 }
+
+// Returns Server-Sent Events:
+// event: start    - Task started
+// event: text     - Streamed text update
+// event: tool     - Tool being used
+// event: done     - Final result with metadata
+// event: error    - Error occurred
 ```
+
+There's also a non-streaming endpoint at `/api/task` if you prefer to wait for the complete response.
 
 ## License
 

@@ -56,15 +56,6 @@
       "default": "https://sleepless-agent.vercel.app"
     },
     {
-      "name": "streamResponse",
-      "title": "Stream Response",
-      "description": "Show response as it streams in (when supported)",
-      "type": "checkbox",
-      "required": false,
-      "default": true,
-      "label": "Enable streaming"
-    },
-    {
       "name": "saveHistory",
       "title": "Save History",
       "description": "Save task history locally",

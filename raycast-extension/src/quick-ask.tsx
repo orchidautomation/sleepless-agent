@@ -181,32 +181,6 @@ _Press ⌘R to retry_`}
       <Detail
         markdown={finalResult || "_No response received._"}
         navigationTitle={response.status === "completed" ? "Done" : "Failed"}
-        metadata={
-          <Detail.Metadata>
-            <Detail.Metadata.Label
-              title=""
-              text={response.status === "completed" ? "Success" : "Failed"}
-              icon={{
-                source: response.status === "completed" ? Icon.CheckCircle : Icon.XMarkCircle,
-                tintColor: response.status === "completed" ? Color.Green : Color.Red,
-              }}
-            />
-            {response.duration && (
-              <Detail.Metadata.Label
-                title="Time"
-                text={`${(response.duration / 1000).toFixed(1)}s`}
-                icon={Icon.Clock}
-              />
-            )}
-            {response.stepsUsed && (
-              <Detail.Metadata.Label
-                title="Steps"
-                text={String(response.stepsUsed)}
-                icon={Icon.Layers}
-              />
-            )}
-          </Detail.Metadata>
-        }
         actions={
           <ActionPanel>
             <ActionPanel.Section>

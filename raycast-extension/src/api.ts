@@ -1,5 +1,12 @@
 import { getPreferenceValues } from "@raycast/api";
-import type { ConversationMessage, Preferences, TaskRequest, TaskResponse } from "./types";
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+  Preferences,
+  TaskRequest,
+  TaskResponse,
+} from "./types";
 
 export interface StreamCallbacks {
   onText?: (text: string) => void;
@@ -61,7 +68,10 @@ export async function executeTaskAsync(task: string): Promise<TaskResponse> {
 export async function executeTaskStreaming(
   task: string,
   callbacks: StreamCallbacks,
-  conversationHistory?: ConversationMessage[]
+  options?: {
+    conversationHistory?: ConversationMessage[];
+    conversationId?: string;
+  }
 ): Promise<TaskResponse> {
   const preferences = getPreferenceValues<Preferences>();
   const endpoint = preferences.apiEndpoint || "https://sleepless-agent.vercel.app";
@@ -72,7 +82,11 @@ export async function executeTaskStreaming(
       "Content-Type": "application/json",
       "X-API-Key": preferences.apiKey,
     },
-    body: JSON.stringify({ task, conversationHistory } satisfies TaskRequest),
+    body: JSON.stringify({
+      task,
+      conversationHistory: options?.conversationHistory,
+      conversationId: options?.conversationId,
+    } satisfies TaskRequest),
   });
 
   if (!response.ok) {
@@ -89,6 +103,7 @@ export async function executeTaskStreaming(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalResponse: TaskResponse | null = null;
+  let conversationId: string | undefined;
 
   try {
     while (true) {
@@ -124,7 +139,7 @@ export async function executeTaskStreaming(
 
           switch (eventType) {
             case "start":
-              // Task started
+              conversationId = data.conversationId;
               break;
             case "text":
               callbacks.onText?.(data.text);
@@ -138,6 +153,7 @@ export async function executeTaskStreaming(
             case "done":
               finalResponse = {
                 id: data.id,
+                conversationId: data.conversationId || conversationId,
                 status: data.status,
                 result: data.result,
                 error: data.error,
@@ -148,6 +164,7 @@ export async function executeTaskStreaming(
             case "error":
               finalResponse = {
                 id: data.id,
+                conversationId: data.conversationId || conversationId,
                 status: "failed",
                 error: data.error,
                 duration: data.duration,
@@ -168,4 +185,66 @@ export async function executeTaskStreaming(
   }
 
   return finalResponse;
+}
+
+/**
+ * List all conversations
+ */
+export async function getConversations(limit = 50): Promise<ConversationSummary[]> {
+  const preferences = getPreferenceValues<Preferences>();
+  const endpoint = preferences.apiEndpoint || "https://sleepless-agent.vercel.app";
+
+  const response = await fetch(`${endpoint}/api/conversations?limit=${limit}`, {
+    headers: {
+      "X-API-Key": preferences.apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch conversations: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.conversations as ConversationSummary[];
+}
+
+/**
+ * Get a specific conversation
+ */
+export async function getConversation(conversationId: string): Promise<Conversation | null> {
+  const preferences = getPreferenceValues<Preferences>();
+  const endpoint = preferences.apiEndpoint || "https://sleepless-agent.vercel.app";
+
+  const response = await fetch(`${endpoint}/api/conversations?id=${conversationId}`, {
+    headers: {
+      "X-API-Key": preferences.apiKey,
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch conversation: ${response.status}`);
+  }
+
+  return response.json() as Promise<Conversation>;
+}
+
+/**
+ * Delete a conversation
+ */
+export async function deleteConversation(conversationId: string): Promise<boolean> {
+  const preferences = getPreferenceValues<Preferences>();
+  const endpoint = preferences.apiEndpoint || "https://sleepless-agent.vercel.app";
+
+  const response = await fetch(`${endpoint}/api/conversations?id=${conversationId}`, {
+    method: "DELETE",
+    headers: {
+      "X-API-Key": preferences.apiKey,
+    },
+  });
+
+  return response.ok;
 }

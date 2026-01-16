@@ -26,6 +26,8 @@ declare namespace Preferences {
   export type QuickAsk = ExtensionPreferences & {}
   /** Preferences accessible in the `history` command */
   export type History = ExtensionPreferences & {}
+  /** Preferences accessible in the `conversations` command */
+  export type Conversations = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -38,5 +40,7 @@ declare namespace Arguments {
 }
   /** Arguments passed to the `history` command */
   export type History = {}
+  /** Arguments passed to the `conversations` command */
+  export type Conversations = {}
 }
 

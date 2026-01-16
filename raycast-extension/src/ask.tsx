@@ -13,7 +13,7 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./historyStorage";
-import type { ConversationMessage, Preferences, TaskResponse } from "./types";
+import type { Preferences, TaskResponse } from "./types";
 
 interface Template {
   id: string;
@@ -68,13 +68,11 @@ const TEMPLATES: Template[] = [
 function ResultView({
   task,
   response,
-  conversationHistory,
   toolsUsed,
   onRetry,
 }: {
   task: string;
   response: TaskResponse;
-  conversationHistory?: ConversationMessage[];
   toolsUsed?: string[];
   onRetry?: () => void;
 }) {
@@ -94,13 +92,6 @@ function ResultView({
   if (activityParts.length > 0) {
     markdown += `\n\n---\n*${activityParts.join(" · ")}*`;
   }
-
-  // Build updated history including this exchange
-  const updatedHistory: ConversationMessage[] = [
-    ...(conversationHistory || []),
-    { role: "user", content: task },
-    { role: "assistant", content: response.result || "" },
-  ];
 
   return (
     <Detail
@@ -125,7 +116,7 @@ function ResultView({
               title="Ask Follow-up"
               icon={Icon.Message}
               shortcut={{ modifiers: ["cmd"], key: "n" }}
-              onAction={() => push(<AskCommand initialHistory={updatedHistory} />)}
+              onAction={() => push(<AskCommand conversationId={response.conversationId} />)}
             />
             <Action
               title="New Chat"
@@ -150,10 +141,10 @@ function ResultView({
 
 function StreamingView({
   task,
-  conversationHistory,
+  conversationId,
 }: {
   task: string;
-  conversationHistory?: ConversationMessage[];
+  conversationId?: string;
 }) {
   const [streamedText, setStreamedText] = useState("");
   const [currentTool, setCurrentTool] = useState<string | null>(null);
@@ -163,7 +154,7 @@ function StreamingView({
   const [error, setError] = useState<string | null>(null);
   const preferences = getPreferenceValues<Preferences>();
   const hasStarted = useRef(false);
-  const { push, pop } = useNavigation();
+  const { pop } = useNavigation();
 
   const startStreaming = async () => {
     try {
@@ -184,7 +175,7 @@ function StreamingView({
             });
           },
         },
-        conversationHistory
+        { conversationId }
       );
 
       setResponse(result);
@@ -274,7 +265,6 @@ _Press ⌘R to retry_`}
       <ResultView
         task={task}
         response={response}
-        conversationHistory={conversationHistory}
         toolsUsed={toolsUsed}
         onRetry={handleRetry}
       />
@@ -303,13 +293,13 @@ _Press ⌘R to retry_`}
 }
 
 export default function AskCommand({
-  initialHistory,
+  conversationId,
 }: {
-  initialHistory?: ConversationMessage[];
+  conversationId?: string;
 } = {}) {
   const [searchText, setSearchText] = useState("");
   const { push } = useNavigation();
-  const isFollowUp = initialHistory && initialHistory.length > 0;
+  const isFollowUp = !!conversationId;
 
   function runTask(task: string) {
     if (!task.trim()) {
@@ -319,7 +309,7 @@ export default function AskCommand({
       });
       return;
     }
-    push(<StreamingView task={task} conversationHistory={initialHistory} />);
+    push(<StreamingView task={task} conversationId={conversationId} />);
   }
 
   // Filter templates based on search text
@@ -392,7 +382,7 @@ export default function AskCommand({
         <List.Section title="Context">
           <List.Item
             icon={Icon.Message}
-            title={`${initialHistory.length} messages in conversation`}
+            title="Continuing conversation"
             subtitle="AI remembers previous context"
             accessories={[{ tag: { value: "Active", color: Color.Green } }]}
           />

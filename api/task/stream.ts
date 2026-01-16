@@ -5,16 +5,18 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { executeTask } from "../../lib/ai.js";
-
-interface ConversationMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+import {
+  saveConversation,
+  getConversation,
+  generateConversationId,
+  type ConversationMessage,
+} from "../../lib/conversations.js";
 
 interface TaskRequest {
   task: string;
   context?: Record<string, unknown>;
   conversationHistory?: ConversationMessage[];
+  conversationId?: string; // Optional - will generate if not provided
 }
 
 // Simple ID generator
@@ -67,6 +69,9 @@ export default async function handler(
 
   const taskId = generateId();
 
+  // Get or generate conversation ID
+  const conversationId = body.conversationId || generateConversationId();
+
   // Set up SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -80,17 +85,28 @@ export default async function handler(
   };
 
   // Send initial event
-  sendEvent("start", { id: taskId, status: "processing" });
+  sendEvent("start", { id: taskId, conversationId, status: "processing" });
 
   const startTime = Date.now();
 
   try {
+    // Load existing conversation if ID provided but no history sent
+    let conversationHistory = body.conversationHistory;
+    let existingConversation = null;
+
+    if (body.conversationId && !conversationHistory) {
+      existingConversation = await getConversation(body.conversationId);
+      if (existingConversation) {
+        conversationHistory = existingConversation.messages;
+      }
+    }
+
     const prompt = buildPrompt(body.task, body.context);
 
     let lastText = "";
 
     const result = await executeTask(prompt, {
-      conversationHistory: body.conversationHistory,
+      conversationHistory,
       onStreamUpdate: async (text: string) => {
         // Only send if there's new content
         if (text !== lastText) {
@@ -109,9 +125,24 @@ export default async function handler(
 
     const duration = Date.now() - startTime;
 
+    // Save conversation with new exchange
+    if (result.success && result.output) {
+      const updatedMessages: ConversationMessage[] = [
+        ...(conversationHistory || []),
+        { role: "user", content: body.task },
+        { role: "assistant", content: result.output },
+      ];
+
+      // Save in background - don't block response
+      saveConversation(conversationId, updatedMessages, existingConversation ?? undefined).catch(
+        (err) => console.error("Failed to save conversation:", err)
+      );
+    }
+
     // Send final result
     sendEvent("done", {
       id: taskId,
+      conversationId,
       status: result.success ? "completed" : "failed",
       result: result.output,
       error: result.error,
@@ -124,6 +155,7 @@ export default async function handler(
 
     sendEvent("error", {
       id: taskId,
+      conversationId,
       status: "failed",
       error: errorMsg,
       duration,

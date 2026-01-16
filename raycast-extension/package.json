@@ -37,6 +37,13 @@
       "description": "View your recent Orchid tasks",
       "mode": "view",
       "icon": "history-icon.png"
+    },
+    {
+      "name": "conversations",
+      "title": "Conversations",
+      "description": "Resume previous conversations with Orchid",
+      "mode": "view",
+      "icon": "command-icon.png"
     }
   ],
   "preferences": [

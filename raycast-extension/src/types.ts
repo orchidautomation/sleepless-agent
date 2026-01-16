@@ -7,9 +7,15 @@ export interface TaskResponse {
   stepsUsed?: number;
 }
 
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface TaskRequest {
   task: string;
   context?: Record<string, unknown>;
+  conversationHistory?: ConversationMessage[];
   async?: boolean;
 }
 

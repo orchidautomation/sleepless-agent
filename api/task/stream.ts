@@ -6,9 +6,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { executeTask } from "../../lib/ai.js";
 
+interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 interface TaskRequest {
   task: string;
   context?: Record<string, unknown>;
+  conversationHistory?: ConversationMessage[];
 }
 
 // Simple ID generator
@@ -84,6 +90,7 @@ export default async function handler(
     let lastText = "";
 
     const result = await executeTask(prompt, {
+      conversationHistory: body.conversationHistory,
       onStreamUpdate: async (text: string) => {
         // Only send if there's new content
         if (text !== lastText) {

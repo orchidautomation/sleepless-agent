@@ -1,5 +1,5 @@
 import { getPreferenceValues } from "@raycast/api";
-import type { Preferences, TaskRequest, TaskResponse } from "./types";
+import type { ConversationMessage, Preferences, TaskRequest, TaskResponse } from "./types";
 
 export interface StreamCallbacks {
   onText?: (text: string) => void;
@@ -60,7 +60,8 @@ export async function executeTaskAsync(task: string): Promise<TaskResponse> {
  */
 export async function executeTaskStreaming(
   task: string,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  conversationHistory?: ConversationMessage[]
 ): Promise<TaskResponse> {
   const preferences = getPreferenceValues<Preferences>();
   const endpoint = preferences.apiEndpoint || "https://sleepless-agent.vercel.app";
@@ -71,7 +72,7 @@ export async function executeTaskStreaming(
       "Content-Type": "application/json",
       "X-API-Key": preferences.apiKey,
     },
-    body: JSON.stringify({ task } satisfies TaskRequest),
+    body: JSON.stringify({ task, conversationHistory } satisfies TaskRequest),
   });
 
   if (!response.ok) {

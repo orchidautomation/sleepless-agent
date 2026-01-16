@@ -13,20 +13,29 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./historyStorage";
-import type { Preferences, TaskResponse } from "./types";
+import type { ConversationMessage, Preferences, TaskResponse } from "./types";
 
 function ResultView({
   task,
   response,
+  conversationHistory,
   onRetry,
 }: {
   task: string;
   response: TaskResponse;
+  conversationHistory?: ConversationMessage[];
   onRetry?: () => void;
 }) {
   const { push } = useNavigation();
   // Clean markdown - only show the actual result, no headers or metadata
   const markdown = response.result || "_No response received._";
+
+  // Build updated history including this exchange
+  const updatedHistory: ConversationMessage[] = [
+    ...(conversationHistory || []),
+    { role: "user", content: task },
+    { role: "assistant", content: response.result || "" },
+  ];
 
   return (
     <Detail
@@ -51,7 +60,7 @@ function ResultView({
               title="Ask Follow-up"
               icon={Icon.Message}
               shortcut={{ modifiers: ["cmd"], key: "n" }}
-              onAction={() => push(<AskCommand />)}
+              onAction={() => push(<AskCommand initialHistory={updatedHistory} />)}
             />
             {onRetry && (
               <Action
@@ -68,7 +77,13 @@ function ResultView({
   );
 }
 
-function StreamingView({ task }: { task: string }) {
+function StreamingView({
+  task,
+  conversationHistory,
+}: {
+  task: string;
+  conversationHistory?: ConversationMessage[];
+}) {
   const [streamedText, setStreamedText] = useState("");
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [toolsUsed, setToolsUsed] = useState<string[]>([]);
@@ -81,21 +96,25 @@ function StreamingView({ task }: { task: string }) {
 
   const startStreaming = async () => {
     try {
-      const result = await executeTaskStreaming(task, {
-        onText: (text) => {
-          setStreamedText(text);
-          setCurrentTool(null);
+      const result = await executeTaskStreaming(
+        task,
+        {
+          onText: (text) => {
+            setStreamedText(text);
+            setCurrentTool(null);
+          },
+          onTool: (toolName) => {
+            setCurrentTool(toolName);
+            setToolsUsed((prev) => {
+              if (!prev.includes(toolName)) {
+                return [...prev, toolName];
+              }
+              return prev;
+            });
+          },
         },
-        onTool: (toolName) => {
-          setCurrentTool(toolName);
-          setToolsUsed((prev) => {
-            if (!prev.includes(toolName)) {
-              return [...prev, toolName];
-            }
-            return prev;
-          });
-        },
-      });
+        conversationHistory
+      );
 
       setResponse(result);
       setIsLoading(false);
@@ -191,7 +210,14 @@ _Press ⌘R to retry_`}
 
   // Show final result view when done - USE response.result as authoritative
   if (!isLoading && response) {
-    return <ResultView task={task} response={response} onRetry={handleRetry} />;
+    return (
+      <ResultView
+        task={task}
+        response={response}
+        conversationHistory={conversationHistory}
+        onRetry={handleRetry}
+      />
+    );
   }
 
   // Show streaming view while loading - clean markdown, metadata in sidebar
@@ -234,7 +260,11 @@ _Press ⌘R to retry_`}
   );
 }
 
-export default function AskCommand() {
+export default function AskCommand({
+  initialHistory,
+}: {
+  initialHistory?: ConversationMessage[];
+} = {}) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { push } = useNavigation();
 
@@ -248,7 +278,7 @@ export default function AskCommand() {
     }
 
     setIsSubmitting(true);
-    push(<StreamingView task={values.task} />);
+    push(<StreamingView task={values.task} conversationHistory={initialHistory} />);
     setIsSubmitting(false);
   }
 

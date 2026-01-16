@@ -84,20 +84,28 @@ export async function getConversation(
   conversationId: string
 ): Promise<Conversation | null> {
   try {
-    // Use head to get the blob metadata and URL directly
-    const blob = await head(`conversations/${conversationId}.json`);
+    // List all conversations and find the matching one
+    const { blobs } = await list({ prefix: "conversations/" });
+    const targetPath = `conversations/${conversationId}.json`;
+    const blob = blobs.find((b) => b.pathname === targetPath);
 
+    if (!blob) {
+      console.log(`Conversation not found: ${conversationId}`);
+      console.log(`Available blobs:`, blobs.map(b => b.pathname));
+      return null;
+    }
+
+    console.log(`Found conversation: ${blob.pathname} at ${blob.url}`);
     const response = await fetch(blob.url);
     if (!response.ok) {
+      console.error(`Failed to fetch conversation: ${response.status}`);
       return null;
     }
 
-    return (await response.json()) as Conversation;
+    const conversation = (await response.json()) as Conversation;
+    console.log(`Loaded conversation with ${conversation.messages.length} messages`);
+    return conversation;
   } catch (error) {
-    // head throws if blob doesn't exist, which is expected for new conversations
-    if (error instanceof Error && error.message.includes("not found")) {
-      return null;
-    }
     console.error("Failed to get conversation:", error);
     return null;
   }

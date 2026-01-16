@@ -1,0 +1,6 @@
+# Exclude Raycast extension from Vercel deployment
+raycast-extension/
+
+# Standard ignores
+node_modules/
+.git/

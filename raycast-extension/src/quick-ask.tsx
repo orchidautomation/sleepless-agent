@@ -1,8 +1,10 @@
 import {
   Action,
   ActionPanel,
+  Color,
   Detail,
   getPreferenceValues,
+  Icon,
   LaunchProps,
   showToast,
   Toast,
@@ -11,7 +13,7 @@ import {
 } from "@raycast/api";
 import { useEffect, useState, useRef } from "react";
 import { executeTaskStreaming } from "./api";
-import { addToHistory } from "./history";
+import { addToHistory } from "./historyStorage";
 import type { Preferences, TaskResponse } from "./types";
 
 interface QuickAskArguments {
@@ -23,10 +25,66 @@ export default function QuickAskCommand(props: LaunchProps<{ arguments: QuickAsk
   const [task, setTask] = useState<string>("");
   const [streamedText, setStreamedText] = useState("");
   const [currentTool, setCurrentTool] = useState<string | null>(null);
+  const [toolsUsed, setToolsUsed] = useState<string[]>([]);
   const [response, setResponse] = useState<TaskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preferences = getPreferenceValues<Preferences>();
   const hasStarted = useRef(false);
+
+  const runTask = async (taskText: string) => {
+    try {
+      showToast({
+        style: Toast.Style.Animated,
+        title: "Processing...",
+      });
+
+      const result = await executeTaskStreaming(taskText, {
+        onText: (text) => {
+          setStreamedText(text);
+          setCurrentTool(null);
+        },
+        onTool: (toolName) => {
+          setCurrentTool(toolName);
+          setToolsUsed((prev) => {
+            if (!prev.includes(toolName)) {
+              return [...prev, toolName];
+            }
+            return prev;
+          });
+        },
+      });
+
+      setResponse(result);
+
+      // Save to history if enabled
+      if (preferences.saveHistory && result.result) {
+        await addToHistory({
+          id: result.id,
+          task: taskText,
+          result: result.result,
+          status: result.status,
+          duration: result.duration,
+          stepsUsed: result.stepsUsed,
+        });
+      }
+
+      showToast({
+        style: Toast.Style.Success,
+        title: "Done!",
+        message: result.duration ? `${(result.duration / 1000).toFixed(1)}s` : "",
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      setError(errorMessage);
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Failed",
+        message: errorMessage,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Prevent double execution in React strict mode
@@ -63,70 +121,51 @@ export default function QuickAskCommand(props: LaunchProps<{ arguments: QuickAsk
       }
 
       setTask(taskText);
-
-      try {
-        showToast({
-          style: Toast.Style.Animated,
-          title: "Processing...",
-          message: "Sleepless Agent is working",
-        });
-
-        const result = await executeTaskStreaming(taskText, {
-          onText: (text) => {
-            setStreamedText(text);
-            setCurrentTool(null);
-          },
-          onTool: (toolName) => {
-            setCurrentTool(toolName);
-          },
-        });
-
-        setResponse(result);
-
-        // Save to history if enabled
-        if (preferences.saveHistory && result.result) {
-          await addToHistory({
-            id: result.id,
-            task: taskText,
-            result: result.result,
-            duration: result.duration,
-            stepsUsed: result.stepsUsed,
-          });
-        }
-
-        showToast({
-          style: Toast.Style.Success,
-          title: "Done!",
-          message: `Completed in ${result.duration ? `${(result.duration / 1000).toFixed(1)}s` : "N/A"}`,
-        });
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        setError(errorMessage);
-        showToast({
-          style: Toast.Style.Failure,
-          title: "Failed",
-          message: errorMessage,
-        });
-      } finally {
-        setIsLoading(false);
-      }
+      await runTask(taskText);
     }
 
     run();
   }, [props.arguments.query, preferences.saveHistory]);
 
+  const handleRetry = () => {
+    if (!task) return;
+    setError(null);
+    setStreamedText("");
+    setCurrentTool(null);
+    setToolsUsed([]);
+    setResponse(null);
+    setIsLoading(true);
+    runTask(task);
+  };
+
   if (error) {
     return (
       <Detail
-        markdown={`# Error
+        markdown={`Something went wrong.
 
-${error}
+**Error:** ${error}
 
 ${task ? `**Task:** ${task}` : ""}
 
-Please check your API key and try again.`}
+_Press ⌘R to retry_`}
+        navigationTitle="Error"
+        metadata={
+          <Detail.Metadata>
+            <Detail.Metadata.TagList title="Status">
+              <Detail.Metadata.TagList.Item text="Failed" color={Color.Red} />
+            </Detail.Metadata.TagList>
+          </Detail.Metadata>
+        }
         actions={
           <ActionPanel>
+            {task && (
+              <Action
+                title="Retry"
+                icon={Icon.ArrowClockwise}
+                shortcut={{ modifiers: ["cmd"], key: "r" }}
+                onAction={handleRetry}
+              />
+            )}
             <Action.CopyToClipboard title="Copy Error" content={error} />
           </ActionPanel>
         }
@@ -134,55 +173,99 @@ Please check your API key and try again.`}
     );
   }
 
-  // Show final result when done
+  // Show final result when done - USE response.result as authoritative
   if (!isLoading && response) {
-    const finalText = streamedText || response.result || "";
-    const markdown = `# Result
-
-${finalText}
-
----
-
-**Task:** ${task}
-**Duration:** ${response.duration ? `${(response.duration / 1000).toFixed(1)}s` : "N/A"}
-**Steps Used:** ${response.stepsUsed || "N/A"}
-`;
+    const finalResult = response.result || "";
 
     return (
       <Detail
-        markdown={markdown}
+        markdown={finalResult || "_No response received._"}
+        navigationTitle={response.status === "completed" ? "Done" : "Failed"}
+        metadata={
+          <Detail.Metadata>
+            <Detail.Metadata.Label
+              title=""
+              text={response.status === "completed" ? "Success" : "Failed"}
+              icon={{
+                source: response.status === "completed" ? Icon.CheckCircle : Icon.XMarkCircle,
+                tintColor: response.status === "completed" ? Color.Green : Color.Red,
+              }}
+            />
+            {response.duration && (
+              <Detail.Metadata.Label
+                title="Time"
+                text={`${(response.duration / 1000).toFixed(1)}s`}
+                icon={Icon.Clock}
+              />
+            )}
+            {response.stepsUsed && (
+              <Detail.Metadata.Label
+                title="Steps"
+                text={String(response.stepsUsed)}
+                icon={Icon.Layers}
+              />
+            )}
+          </Detail.Metadata>
+        }
         actions={
           <ActionPanel>
-            <Action.CopyToClipboard title="Copy Result" content={finalText} />
-            <Action.Paste title="Paste Result" content={finalText} />
-            <Action.CopyToClipboard
-              title="Copy Task ID"
-              content={response.id}
-              shortcut={{ modifiers: ["cmd"], key: "i" }}
-            />
+            <ActionPanel.Section>
+              <Action.CopyToClipboard
+                title="Copy Result"
+                content={finalResult}
+                shortcut={{ modifiers: ["cmd"], key: "c" }}
+              />
+              <Action.Paste
+                title="Paste Result"
+                content={finalResult}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
+              />
+            </ActionPanel.Section>
+            <ActionPanel.Section>
+              <Action
+                title="Retry"
+                icon={Icon.ArrowClockwise}
+                shortcut={{ modifiers: ["cmd"], key: "r" }}
+                onAction={handleRetry}
+              />
+            </ActionPanel.Section>
           </ActionPanel>
         }
       />
     );
   }
 
-  // Show streaming view while loading
-  const statusLine = currentTool ? `🔧 Using: \`${currentTool}\`` : "⏳ _Thinking..._";
-
-  const markdown = `# Processing...
-
-${task ? `**Task:** ${task}` : "Loading..."}
-
-${statusLine}
-
----
-
-${streamedText || "_Waiting for response..._"}`;
+  // Show streaming view while loading - clean markdown, metadata in sidebar
+  const markdown = streamedText || "_Thinking..._";
 
   return (
     <Detail
       isLoading={isLoading}
       markdown={markdown}
+      navigationTitle={currentTool || "Working..."}
+      metadata={
+        <Detail.Metadata>
+          <Detail.Metadata.Label
+            title=""
+            text="Running"
+            icon={{ source: Icon.Clock, tintColor: Color.Blue }}
+          />
+          {currentTool && (
+            <Detail.Metadata.Label
+              title="Tool"
+              text={currentTool}
+              icon={Icon.Gear}
+            />
+          )}
+          {toolsUsed.length > 0 && (
+            <Detail.Metadata.Label
+              title="Steps"
+              text={String(toolsUsed.length)}
+              icon={Icon.Layers}
+            />
+          )}
+        </Detail.Metadata>
+      }
       actions={
         <ActionPanel>
           <Action.CopyToClipboard title="Copy Current Text" content={streamedText} />

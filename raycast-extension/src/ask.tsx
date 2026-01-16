@@ -1,47 +1,93 @@
 import {
   Action,
   ActionPanel,
+  Color,
   Detail,
   Form,
   getPreferenceValues,
+  Icon,
   showToast,
   Toast,
   useNavigation,
 } from "@raycast/api";
 import { useState, useEffect, useRef } from "react";
 import { executeTaskStreaming } from "./api";
-import { addToHistory } from "./history";
+import { addToHistory } from "./historyStorage";
 import type { Preferences, TaskResponse } from "./types";
 
-function ResultView({ task, response }: { task: string; response: TaskResponse }) {
-  const markdown = `# Result
-
-${response.result || "No response received."}
-
----
-
-**Task ID:** \`${response.id}\`
-**Duration:** ${response.duration ? `${(response.duration / 1000).toFixed(1)}s` : "N/A"}
-**Steps Used:** ${response.stepsUsed || "N/A"}
-`;
+function ResultView({
+  task,
+  response,
+  onRetry,
+}: {
+  task: string;
+  response: TaskResponse;
+  onRetry?: () => void;
+}) {
+  const { push } = useNavigation();
+  // Clean markdown - only show the actual result, no headers or metadata
+  const markdown = response.result || "_No response received._";
 
   return (
     <Detail
       markdown={markdown}
+      navigationTitle={response.status === "completed" ? "Done" : "Failed"}
       metadata={
         <Detail.Metadata>
-          <Detail.Metadata.Label title="Status" text={response.status} />
-          <Detail.Metadata.Label title="Task" text={task} />
+          <Detail.Metadata.Label
+            title=""
+            text={response.status === "completed" ? "Success" : "Failed"}
+            icon={{
+              source: response.status === "completed" ? Icon.CheckCircle : Icon.XMarkCircle,
+              tintColor: response.status === "completed" ? Color.Green : Color.Red,
+            }}
+          />
           {response.duration && (
-            <Detail.Metadata.Label title="Duration" text={`${(response.duration / 1000).toFixed(1)}s`} />
+            <Detail.Metadata.Label
+              title="Time"
+              text={`${(response.duration / 1000).toFixed(1)}s`}
+              icon={Icon.Clock}
+            />
           )}
-          {response.stepsUsed && <Detail.Metadata.Label title="Steps" text={String(response.stepsUsed)} />}
+          {response.stepsUsed && (
+            <Detail.Metadata.Label
+              title="Steps"
+              text={String(response.stepsUsed)}
+              icon={Icon.Layers}
+            />
+          )}
         </Detail.Metadata>
       }
       actions={
         <ActionPanel>
-          <Action.CopyToClipboard title="Copy Result" content={response.result || ""} />
-          <Action.CopyToClipboard title="Copy Task ID" content={response.id} shortcut={{ modifiers: ["cmd"], key: "i" }} />
+          <ActionPanel.Section>
+            <Action.CopyToClipboard
+              title="Copy Result"
+              content={response.result || ""}
+              shortcut={{ modifiers: ["cmd"], key: "c" }}
+            />
+            <Action.Paste
+              title="Paste Result"
+              content={response.result || ""}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
+            />
+          </ActionPanel.Section>
+          <ActionPanel.Section>
+            <Action
+              title="Ask Follow-up"
+              icon={Icon.Message}
+              shortcut={{ modifiers: ["cmd"], key: "n" }}
+              onAction={() => push(<AskCommand />)}
+            />
+            {onRetry && (
+              <Action
+                title="Retry Task"
+                icon={Icon.ArrowClockwise}
+                shortcut={{ modifiers: ["cmd"], key: "r" }}
+                onAction={onRetry}
+              />
+            )}
+          </ActionPanel.Section>
         </ActionPanel>
       }
     />
@@ -51,109 +97,160 @@ ${response.result || "No response received."}
 function StreamingView({ task }: { task: string }) {
   const [streamedText, setStreamedText] = useState("");
   const [currentTool, setCurrentTool] = useState<string | null>(null);
+  const [toolsUsed, setToolsUsed] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [response, setResponse] = useState<TaskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preferences = getPreferenceValues<Preferences>();
   const hasStarted = useRef(false);
+  const { push, pop } = useNavigation();
+
+  const startStreaming = async () => {
+    try {
+      const result = await executeTaskStreaming(task, {
+        onText: (text) => {
+          setStreamedText(text);
+          setCurrentTool(null);
+        },
+        onTool: (toolName) => {
+          setCurrentTool(toolName);
+          setToolsUsed((prev) => {
+            if (!prev.includes(toolName)) {
+              return [...prev, toolName];
+            }
+            return prev;
+          });
+        },
+      });
+
+      setResponse(result);
+      setIsLoading(false);
+
+      // Save to history if enabled
+      if (preferences.saveHistory && result.result) {
+        await addToHistory({
+          id: result.id,
+          task,
+          result: result.result,
+          status: result.status,
+          duration: result.duration,
+          stepsUsed: result.stepsUsed,
+        });
+      }
+
+      showToast({
+        style: result.status === "completed" ? Toast.Style.Success : Toast.Style.Failure,
+        title: result.status === "completed" ? "Done!" : "Task Failed",
+        message:
+          result.status === "completed"
+            ? `${result.duration ? `${(result.duration / 1000).toFixed(1)}s` : ""}`
+            : result.error || "Unknown error",
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      setError(errorMessage);
+      setIsLoading(false);
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Task Failed",
+        message: errorMessage,
+      });
+    }
+  };
 
   useEffect(() => {
     // Prevent double execution in React strict mode
     if (hasStarted.current) return;
     hasStarted.current = true;
-
-    async function startStreaming() {
-      try {
-        const result = await executeTaskStreaming(task, {
-          onText: (text) => {
-            setStreamedText(text);
-            setCurrentTool(null);
-          },
-          onTool: (toolName) => {
-            setCurrentTool(toolName);
-          },
-        });
-
-        setResponse(result);
-        setIsLoading(false);
-
-        // Save to history if enabled
-        if (preferences.saveHistory && result.result) {
-          await addToHistory({
-            id: result.id,
-            task,
-            result: result.result,
-            duration: result.duration,
-            stepsUsed: result.stepsUsed,
-          });
-        }
-
-        showToast({
-          style: result.status === "completed" ? Toast.Style.Success : Toast.Style.Failure,
-          title: result.status === "completed" ? "Task Completed" : "Task Failed",
-          message:
-            result.status === "completed"
-              ? `Completed in ${result.duration ? `${(result.duration / 1000).toFixed(1)}s` : "N/A"}`
-              : result.error || "Unknown error",
-        });
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        setError(errorMessage);
-        setIsLoading(false);
-        showToast({
-          style: Toast.Style.Failure,
-          title: "Task Failed",
-          message: errorMessage,
-        });
-      }
-    }
-
     startStreaming();
   }, [task, preferences.saveHistory]);
+
+  const handleRetry = () => {
+    setError(null);
+    setStreamedText("");
+    setCurrentTool(null);
+    setToolsUsed([]);
+    setResponse(null);
+    setIsLoading(true);
+    hasStarted.current = false;
+    startStreaming();
+  };
 
   if (error) {
     return (
       <Detail
-        markdown={`# Error
-
-Something went wrong while processing your request.
+        markdown={`Something went wrong while processing your request.
 
 **Error:** ${error}
 
-**Task:** ${task}
-
-Please check your API key and try again.`}
+_Press ⌘R to retry_`}
+        navigationTitle="Error"
+        metadata={
+          <Detail.Metadata>
+            <Detail.Metadata.TagList title="Status">
+              <Detail.Metadata.TagList.Item text="Failed" color={Color.Red} />
+            </Detail.Metadata.TagList>
+            <Detail.Metadata.Separator />
+            <Detail.Metadata.Label title="Task" text={task.slice(0, 50)} />
+          </Detail.Metadata>
+        }
         actions={
           <ActionPanel>
+            <Action
+              title="Retry"
+              icon={Icon.ArrowClockwise}
+              shortcut={{ modifiers: ["cmd"], key: "r" }}
+              onAction={handleRetry}
+            />
             <Action.CopyToClipboard title="Copy Error" content={error} />
+            <Action
+              title="Go Back"
+              icon={Icon.ArrowLeft}
+              shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+              onAction={pop}
+            />
           </ActionPanel>
         }
       />
     );
   }
 
-  // Show final result view when done
+  // Show final result view when done - USE response.result as authoritative
   if (!isLoading && response) {
-    return <ResultView task={task} response={{ ...response, result: streamedText || response.result }} />;
+    return <ResultView task={task} response={response} onRetry={handleRetry} />;
   }
 
-  // Show streaming view while loading
-  const statusLine = currentTool ? `🔧 Using: \`${currentTool}\`` : "⏳ _Thinking..._";
-
-  const markdown = `# Processing...
-
-**Task:** ${task}
-
-${statusLine}
-
----
-
-${streamedText || "_Waiting for response..._"}`;
+  // Show streaming view while loading - clean markdown, metadata in sidebar
+  const markdown = streamedText || "_Thinking..._";
 
   return (
     <Detail
       isLoading={isLoading}
       markdown={markdown}
+      navigationTitle={currentTool || "Working..."}
+      metadata={
+        <Detail.Metadata>
+          <Detail.Metadata.Label
+            title=""
+            text="Running"
+            icon={{ source: Icon.Clock, tintColor: Color.Blue }}
+          />
+          {currentTool && (
+            <Detail.Metadata.Label
+              title="Tool"
+              text={currentTool}
+              icon={Icon.Gear}
+            />
+          )}
+          {toolsUsed.length > 0 && (
+            <Detail.Metadata.Label
+              title="Steps"
+              text={String(toolsUsed.length)}
+              icon={Icon.Layers}
+            />
+          )}
+        </Detail.Metadata>
+      }
       actions={
         <ActionPanel>
           <Action.CopyToClipboard title="Copy Current Text" content={streamedText} />
@@ -171,44 +268,36 @@ export default function AskCommand() {
     if (!values.task.trim()) {
       showToast({
         style: Toast.Style.Failure,
-        title: "Task Required",
-        message: "Please enter a task or question",
+        title: "Enter a task",
       });
       return;
     }
 
     setIsSubmitting(true);
-
-    showToast({
-      style: Toast.Style.Animated,
-      title: "Processing...",
-      message: "Sleepless Agent is working",
-    });
-
-    // Navigate to streaming view
     push(<StreamingView task={values.task} />);
-
     setIsSubmitting(false);
   }
 
   return (
     <Form
       isLoading={isSubmitting}
+      enableDrafts
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Ask Sleepless Agent" onSubmit={handleSubmit} />
+          <Action.SubmitForm title="Run" onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >
       <Form.TextArea
         id="task"
-        title="Task"
-        placeholder="What would you like me to do? e.g., 'Check my calendar for tomorrow' or 'Find recent emails from John'"
+        title=""
+        placeholder="Ask anything... Check my calendar, read emails, search the web..."
+        autoFocus
         enableMarkdown={false}
       />
       <Form.Description
-        title="Capabilities"
-        text="Sleepless Agent has access to 500+ tools including CRM, email, calendar, GitHub, web search, and more."
+        title="Try"
+        text="Check my calendar · Read recent emails · Create a GitHub issue · Search the web"
       />
     </Form>
   );

@@ -17,6 +17,7 @@ export interface HistoryItem {
   id: string;
   task: string;
   result: string;
+  status?: "completed" | "failed";
   timestamp: number;
   duration?: number;
   stepsUsed?: number;

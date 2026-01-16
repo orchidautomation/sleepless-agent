@@ -2,7 +2,7 @@
  * Conversation storage using Vercel Blob
  */
 
-import { put, list, del } from "@vercel/blob";
+import { put, list, del, head } from "@vercel/blob";
 
 export interface ConversationMessage {
   role: "user" | "assistant";
@@ -84,21 +84,20 @@ export async function getConversation(
   conversationId: string
 ): Promise<Conversation | null> {
   try {
-    const { blobs } = await list({
-      prefix: `conversations/${conversationId}.json`,
-    });
+    // Use head to get the blob metadata and URL directly
+    const blob = await head(`conversations/${conversationId}.json`);
 
-    if (blobs.length === 0) {
-      return null;
-    }
-
-    const response = await fetch(blobs[0].url);
+    const response = await fetch(blob.url);
     if (!response.ok) {
       return null;
     }
 
     return (await response.json()) as Conversation;
   } catch (error) {
+    // head throws if blob doesn't exist, which is expected for new conversations
+    if (error instanceof Error && error.message.includes("not found")) {
+      return null;
+    }
     console.error("Failed to get conversation:", error);
     return null;
   }

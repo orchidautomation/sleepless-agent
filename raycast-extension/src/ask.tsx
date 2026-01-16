@@ -3,9 +3,9 @@ import {
   ActionPanel,
   Color,
   Detail,
-  Form,
   getPreferenceValues,
   Icon,
+  List,
   showToast,
   Toast,
   useNavigation,
@@ -14,6 +14,56 @@ import { useState, useEffect, useRef } from "react";
 import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./historyStorage";
 import type { ConversationMessage, Preferences, TaskResponse } from "./types";
+
+interface Template {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: Icon;
+  task?: string; // If set, runs immediately. If not, prefills search.
+}
+
+const TEMPLATES: Template[] = [
+  {
+    id: "calendar",
+    title: "Check my calendar today",
+    subtitle: "See upcoming meetings and events",
+    icon: Icon.Calendar,
+    task: "What's on my calendar today?",
+  },
+  {
+    id: "email",
+    title: "Read my recent emails",
+    subtitle: "Summarize unread messages",
+    icon: Icon.Envelope,
+    task: "Summarize my recent unread emails",
+  },
+  {
+    id: "research",
+    title: "Research a company or person",
+    subtitle: "Deep dive with web search",
+    icon: Icon.MagnifyingGlass,
+  },
+  {
+    id: "draft",
+    title: "Draft an email",
+    subtitle: "Compose and send messages",
+    icon: Icon.Pencil,
+  },
+  {
+    id: "github",
+    title: "Check GitHub notifications",
+    subtitle: "PRs, issues, and mentions",
+    icon: Icon.Code,
+    task: "What are my recent GitHub notifications?",
+  },
+  {
+    id: "notion",
+    title: "Search my Notion",
+    subtitle: "Find notes and documents",
+    icon: Icon.Document,
+  },
+];
 
 function ResultView({
   task,
@@ -265,44 +315,97 @@ export default function AskCommand({
 }: {
   initialHistory?: ConversationMessage[];
 } = {}) {
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchText, setSearchText] = useState("");
   const { push } = useNavigation();
+  const isFollowUp = initialHistory && initialHistory.length > 0;
 
-  async function handleSubmit(values: { task: string }) {
-    if (!values.task.trim()) {
+  function runTask(task: string) {
+    if (!task.trim()) {
       showToast({
         style: Toast.Style.Failure,
         title: "Enter a task",
       });
       return;
     }
-
-    setIsSubmitting(true);
-    push(<StreamingView task={values.task} conversationHistory={initialHistory} />);
-    setIsSubmitting(false);
+    push(<StreamingView task={task} conversationHistory={initialHistory} />);
   }
 
+  // Filter templates based on search text
+  const filteredTemplates = searchText.trim()
+    ? TEMPLATES.filter(
+        (t) =>
+          t.title.toLowerCase().includes(searchText.toLowerCase()) ||
+          t.subtitle.toLowerCase().includes(searchText.toLowerCase())
+      )
+    : TEMPLATES;
+
   return (
-    <Form
-      isLoading={isSubmitting}
-      enableDrafts
-      actions={
-        <ActionPanel>
-          <Action.SubmitForm title="Run" onSubmit={handleSubmit} />
-        </ActionPanel>
-      }
+    <List
+      searchBarPlaceholder={isFollowUp ? "Ask a follow-up..." : "Ask anything..."}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      filtering={false}
     >
-      <Form.TextArea
-        id="task"
-        title=""
-        placeholder="Ask anything... Check my calendar, read emails, search the web..."
-        autoFocus
-        enableMarkdown={false}
-      />
-      <Form.Description
-        title="Try"
-        text="Check my calendar · Read recent emails · Create a GitHub issue · Search the web"
-      />
-    </Form>
+      {/* Show custom query option when user types */}
+      {searchText.trim() && (
+        <List.Section title={isFollowUp ? "Follow-up" : ""}>
+          <List.Item
+            icon={Icon.ArrowRight}
+            title={searchText}
+            subtitle="Run this query"
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Run"
+                  icon={Icon.Play}
+                  onAction={() => runTask(searchText)}
+                />
+              </ActionPanel>
+            }
+          />
+        </List.Section>
+      )}
+
+      {/* Template suggestions */}
+      <List.Section title={searchText.trim() ? "Suggestions" : isFollowUp ? "Or try..." : "Quick actions"}>
+        {filteredTemplates.map((template) => (
+          <List.Item
+            key={template.id}
+            icon={template.icon}
+            title={template.title}
+            subtitle={template.subtitle}
+            actions={
+              <ActionPanel>
+                {template.task ? (
+                  <Action
+                    title="Run"
+                    icon={Icon.Play}
+                    onAction={() => runTask(template.task!)}
+                  />
+                ) : (
+                  <Action
+                    title="Use Template"
+                    icon={Icon.Pencil}
+                    onAction={() => setSearchText(template.title + " ")}
+                  />
+                )}
+              </ActionPanel>
+            }
+          />
+        ))}
+      </List.Section>
+
+      {/* Follow-up context indicator */}
+      {isFollowUp && (
+        <List.Section title="Context">
+          <List.Item
+            icon={Icon.Message}
+            title={`${initialHistory.length} messages in conversation`}
+            subtitle="AI remembers previous context"
+            accessories={[{ tag: { value: "Active", color: Color.Green } }]}
+          />
+        </List.Section>
+      )}
+    </List>
   );
 }

@@ -148,7 +148,7 @@ export default function HistoryCommand() {
         <List.EmptyView
           icon={Icon.Clock}
           title="No History Yet"
-          description="Your task history will appear here after you ask Sleepless Agent something."
+          description="Your task history will appear here after you ask Orchid something."
         />
       </List>
     );

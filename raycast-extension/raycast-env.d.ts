@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** API Key - Your Sleepless Agent API key (PERSONAL_OS_API_KEY) */
+  /** API Key - Your Orchid API key */
   "apiKey": string,
   /** API Endpoint - Custom API endpoint (defaults to production) */
   "apiEndpoint": string,

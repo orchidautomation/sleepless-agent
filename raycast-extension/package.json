@@ -1,8 +1,8 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
-  "name": "sleepless-agent",
-  "title": "Sleepless Agent",
-  "description": "AI assistant powered by Sleepless Agent with access to 500+ MCP tools for CRM, email, calendar, GitHub, and more",
+  "name": "orchid",
+  "title": "Orchid",
+  "description": "AI assistant with access to 500+ MCP tools for CRM, email, calendar, GitHub, and more",
   "icon": "extension-icon.png",
   "author": "terragon",
   "categories": ["Productivity", "Developer Tools"],
@@ -11,8 +11,8 @@
   "commands": [
     {
       "name": "ask",
-      "title": "Ask Sleepless Agent",
-      "description": "Ask the Sleepless Agent to perform any task",
+      "title": "Ask Orchid",
+      "description": "Ask Orchid to perform any task",
       "mode": "view",
       "icon": "command-icon.png"
     },
@@ -33,8 +33,8 @@
     },
     {
       "name": "history",
-      "title": "Task History",
-      "description": "View your recent Sleepless Agent tasks",
+      "title": "History",
+      "description": "View your recent Orchid tasks",
       "mode": "view",
       "icon": "history-icon.png"
     }
@@ -43,7 +43,7 @@
     {
       "name": "apiKey",
       "title": "API Key",
-      "description": "Your Sleepless Agent API key (PERSONAL_OS_API_KEY)",
+      "description": "Your Orchid API key",
       "type": "password",
       "required": true
     },

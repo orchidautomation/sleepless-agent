@@ -69,16 +69,31 @@ function ResultView({
   task,
   response,
   conversationHistory,
+  toolsUsed,
   onRetry,
 }: {
   task: string;
   response: TaskResponse;
   conversationHistory?: ConversationMessage[];
+  toolsUsed?: string[];
   onRetry?: () => void;
 }) {
   const { push } = useNavigation();
-  // Clean markdown - only show the actual result, no headers or metadata
-  const markdown = response.result || "_No response received._";
+
+  // Build markdown with result and subtle activity footer
+  let markdown = response.result || "_No response received._";
+
+  // Add activity summary footer
+  const activityParts: string[] = [];
+  if (toolsUsed && toolsUsed.length > 0) {
+    activityParts.push(`${toolsUsed.length} tool${toolsUsed.length > 1 ? "s" : ""}`);
+  }
+  if (response.duration) {
+    activityParts.push(`${(response.duration / 1000).toFixed(1)}s`);
+  }
+  if (activityParts.length > 0) {
+    markdown += `\n\n---\n*${activityParts.join(" · ")}*`;
+  }
 
   // Build updated history including this exchange
   const updatedHistory: ConversationMessage[] = [
@@ -222,21 +237,10 @@ function StreamingView({
   if (error) {
     return (
       <Detail
-        markdown={`Something went wrong while processing your request.
-
-**Error:** ${error}
+        markdown={`**Error:** ${error}
 
 _Press ⌘R to retry_`}
         navigationTitle="Error"
-        metadata={
-          <Detail.Metadata>
-            <Detail.Metadata.TagList title="Status">
-              <Detail.Metadata.TagList.Item text="Failed" color={Color.Red} />
-            </Detail.Metadata.TagList>
-            <Detail.Metadata.Separator />
-            <Detail.Metadata.Label title="Task" text={task.slice(0, 50)} />
-          </Detail.Metadata>
-        }
         actions={
           <ActionPanel>
             <Action
@@ -265,42 +269,23 @@ _Press ⌘R to retry_`}
         task={task}
         response={response}
         conversationHistory={conversationHistory}
+        toolsUsed={toolsUsed}
         onRetry={handleRetry}
       />
     );
   }
 
-  // Show streaming view while loading - clean markdown, metadata in sidebar
+  // Show streaming view while loading - full width, progress in nav title
   const markdown = streamedText || "_Thinking..._";
+  const navTitle = currentTool
+    ? `${currentTool}${toolsUsed.length > 1 ? ` (${toolsUsed.length})` : ""}`
+    : "Working...";
 
   return (
     <Detail
       isLoading={isLoading}
       markdown={markdown}
-      navigationTitle={currentTool || "Working..."}
-      metadata={
-        <Detail.Metadata>
-          <Detail.Metadata.Label
-            title=""
-            text="Running"
-            icon={{ source: Icon.Clock, tintColor: Color.Blue }}
-          />
-          {currentTool && (
-            <Detail.Metadata.Label
-              title="Tool"
-              text={currentTool}
-              icon={Icon.Gear}
-            />
-          )}
-          {toolsUsed.length > 0 && (
-            <Detail.Metadata.Label
-              title="Steps"
-              text={String(toolsUsed.length)}
-              icon={Icon.Layers}
-            />
-          )}
-        </Detail.Metadata>
-      }
+      navigationTitle={navTitle}
       actions={
         <ActionPanel>
           <Action.CopyToClipboard title="Copy Current Text" content={streamedText} />

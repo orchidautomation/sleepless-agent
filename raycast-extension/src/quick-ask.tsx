@@ -3,6 +3,7 @@ import {
   ActionPanel,
   Detail,
   getPreferenceValues,
+  Icon,
   LaunchProps,
   showToast,
   Toast,
@@ -162,7 +163,7 @@ _Press ⌘R to retry_`}
 
   // Show final result when done - USE response.result as authoritative
   if (!isLoading && response) {
-    let markdown = response.result || "_No response received._";
+    let markdown = `> ${task}\n\n${response.result || "_No response received._"}`;
 
     // Add activity summary footer
     const activityParts: string[] = [];
@@ -209,7 +210,8 @@ _Press ⌘R to retry_`}
   }
 
   // Show streaming view while loading - full width, progress in nav title
-  const markdown = streamedText || "_Thinking..._";
+  const responseText = streamedText || "_Thinking..._";
+  const markdown = `> ${task}\n\n${responseText}`;
   const navTitle = currentTool
     ? `${currentTool}${toolsUsed.length > 1 ? ` (${toolsUsed.length})` : ""}`
     : "Working...";

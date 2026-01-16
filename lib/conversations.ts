@@ -2,7 +2,7 @@
  * Conversation storage using Vercel Blob
  */
 
-import { put, list, del, head } from "@vercel/blob";
+import { put, list, del } from "@vercel/blob";
 
 export interface ConversationMessage {
   role: "user" | "assistant";
@@ -84,11 +84,7 @@ export async function getConversation(
   conversationId: string
 ): Promise<Conversation | null> {
   try {
-    // List all conversations and find the matching one
     const { blobs } = await list({ prefix: "conversations/" });
-
-    console.log(`Looking for conversation: ${conversationId}`);
-    console.log(`Available blobs:`, blobs.map(b => b.pathname));
 
     // Try exact match first, then fallback to includes
     let blob = blobs.find((b) => b.pathname === `conversations/${conversationId}.json`);
@@ -97,20 +93,15 @@ export async function getConversation(
     }
 
     if (!blob) {
-      console.log(`Conversation not found: ${conversationId}`);
       return null;
     }
 
-    console.log(`Found conversation: ${blob.pathname} at ${blob.url}`);
     const response = await fetch(blob.url);
     if (!response.ok) {
-      console.error(`Failed to fetch conversation: ${response.status}`);
       return null;
     }
 
-    const conversation = (await response.json()) as Conversation;
-    console.log(`Loaded conversation with ${conversation.messages.length} messages`);
-    return conversation;
+    return (await response.json()) as Conversation;
   } catch (error) {
     console.error("Failed to get conversation:", error);
     return null;

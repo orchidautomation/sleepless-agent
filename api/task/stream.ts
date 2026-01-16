@@ -94,16 +94,10 @@ export default async function handler(
     let conversationHistory = body.conversationHistory;
     let existingConversation = null;
 
-    console.log(`Request: conversationId=${body.conversationId}, hasHistory=${!!conversationHistory}`);
-
     if (body.conversationId && !conversationHistory) {
-      console.log(`Loading conversation: ${body.conversationId}`);
       existingConversation = await getConversation(body.conversationId);
       if (existingConversation) {
         conversationHistory = existingConversation.messages;
-        console.log(`Loaded ${conversationHistory.length} messages from conversation`);
-      } else {
-        console.log(`Conversation not found: ${body.conversationId}`);
       }
     }
 

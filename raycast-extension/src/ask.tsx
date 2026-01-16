@@ -127,6 +127,12 @@ function ResultView({
               shortcut={{ modifiers: ["cmd"], key: "n" }}
               onAction={() => push(<AskCommand initialHistory={updatedHistory} />)}
             />
+            <Action
+              title="New Chat"
+              icon={Icon.Plus}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+              onAction={() => push(<AskCommand />)}
+            />
             {onRetry && (
               <Action
                 title="Retry Task"

@@ -86,12 +86,18 @@ export async function getConversation(
   try {
     // List all conversations and find the matching one
     const { blobs } = await list({ prefix: "conversations/" });
-    const targetPath = `conversations/${conversationId}.json`;
-    const blob = blobs.find((b) => b.pathname === targetPath);
+
+    console.log(`Looking for conversation: ${conversationId}`);
+    console.log(`Available blobs:`, blobs.map(b => b.pathname));
+
+    // Try exact match first, then fallback to includes
+    let blob = blobs.find((b) => b.pathname === `conversations/${conversationId}.json`);
+    if (!blob) {
+      blob = blobs.find((b) => b.pathname.includes(conversationId));
+    }
 
     if (!blob) {
       console.log(`Conversation not found: ${conversationId}`);
-      console.log(`Available blobs:`, blobs.map(b => b.pathname));
       return null;
     }
 

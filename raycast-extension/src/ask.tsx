@@ -14,6 +14,7 @@ import { useState, useEffect, useRef } from "react";
 import { executeTaskStreaming } from "./api";
 import { addToHistory } from "./historyStorage";
 import type { Preferences, TaskResponse } from "./types";
+import ConversationsCommand from "./conversations";
 
 interface Template {
   id: string;
@@ -123,6 +124,12 @@ function ResultView({
               icon={Icon.Plus}
               shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
               onAction={() => push(<AskCommand />)}
+            />
+            <Action.Push
+              title="View Conversations"
+              icon={Icon.List}
+              shortcut={{ modifiers: ["cmd"], key: "l" }}
+              target={<ConversationsCommand />}
             />
             {onRetry && (
               <Action

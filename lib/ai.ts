@@ -254,7 +254,7 @@ export async function executeTask(
     const result = await withRetry(
       async () => {
         const { textStream, steps } = streamText({
-          model: gateway("xai/grok-4.1-fast-reasoning"),
+          model: gateway("anthropic/claude-sonnet-4.5"),
           system: SYSTEM_PROMPT,
           messages,
           tools,
